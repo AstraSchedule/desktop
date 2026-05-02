@@ -402,6 +402,8 @@ function setCountdownerPosition() {
     countdownContainer.style.top = offset.y + 'px';
     countdownContainer.style.transform = 'none';
 
+    void countdownContainer.offsetHeight;
+
     // 恢复过渡效果
     countdownContainer.style.transition = originalTransition;
 }
