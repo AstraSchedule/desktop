@@ -905,6 +905,27 @@ ipcMain.on('getWeekIndex', (e, arg) => {
             }
         },
         {
+            icon: asset('image', 'toggle.png'),
+            label: '调试输入',
+            click: () => {
+                prompt({
+                    title: '调试输入',
+                    label: '',
+                    value: store.get('debugInputValue', '0'),
+                    inputAttrs: {
+                        type: 'string'
+                    },
+                    type: 'input',
+                    height: 140,
+                    width: 300,
+                }).then((r) => {
+                    if (r === null) return
+                    store.set('debugInputValue', r.toString())
+                    win.webContents.send('debugInputChanged', r.toString())
+                })
+            }
+        },
+        {
             icon: asset('image', 'github.png'),
             label: '源码仓库',
             click: () => {

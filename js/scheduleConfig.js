@@ -106,7 +106,23 @@ const _scheduleConfig = {
         '--triangle-size': '16px', // 倒计时框上方小三角箭头的大小
         '--sub-font-size': '20px', // 中间课表中的课程下角标(X@X)的字体大小
         '--banner-height': '30px', // 顶部横幅高度
-    }
+    },
+
+    // 天气温度颜色配置：各温度段的颜色映射，stops 中每个端点包含温度阈值(temp)和对应颜色(color)
+    // 温度匹配规则：找到第一个 temp > 当前温度的端点，使用其颜色
+    // use_gradient: true 时在两个相邻端点间线性插值颜色，false 时使用离散颜色
+    temperature_colors: {
+        use_gradient: false,
+        stops: [
+            { temp: 20, color: "#66CCFF" },
+            { temp: 30, color: "#5FBC21" },
+            { temp: 36, color: "#FF8C00" },
+            { temp: 100, color: "#EE0000" }
+        ]
+    },
+
+    // 调试输入值：当前用于气温偏移量，但不与气温概念强绑定，后续可能用作其他调试参数
+    debug_input_value: "0",
 }
 
 let scheduleConfig = structuredClone(_scheduleConfig);
