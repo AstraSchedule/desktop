@@ -112,7 +112,6 @@ body:
         - 客户端（AstraSchedule）
         - 管理端（AstraScheduleWeb）
         - 服务端（新版，AstraScheduleServerGo）
-        - 服务端（旧版，AstraScheduleServer，可能废弃！）
         - 复合
         - 我不确定
     validations:
