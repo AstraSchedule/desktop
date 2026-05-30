@@ -746,7 +746,7 @@ ipcMain.on('getWeekIndex', (e, arg) => {
             console.error('Failed to destroy tray:', err);
         }
     }
-    tray = new Tray(asset('image', 'icon.png'))
+    tray = new Tray(asset('image', store.get('trayIcon', 'icon') + '.png'))
     template = [
         {
             label: '连接云端',
@@ -982,6 +982,18 @@ ipcMain.on('getWeekIndex', (e, arg) => {
             click: (e) => {
                 store.set('isAutoLaunch', e.checked)
                 setAutoLaunch()
+            }
+        },
+        {
+            icon: asset('image', 'toggle.png'),
+            label: '切换图标',
+            click: () => {
+                const current = store.get('trayIcon', 'icon');
+                const newIcon = current === 'icon' ? 'appIcon' : 'icon';
+                store.set('trayIcon', newIcon);
+                if (tray && !tray.isDestroyed()) {
+                    tray.setImage(asset('image', newIcon + '.png'));
+                }
             }
         },
         {
