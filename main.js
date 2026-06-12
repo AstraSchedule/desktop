@@ -7,7 +7,6 @@ const createShortcut = require('windows-shortcuts')
 const startupFolderPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup');
 const prompt = require('electron-prompt');
 const Store = require('electron-store');
-const { DisableMinimize } = require('electron-disable-minimize');
 const store = new Store();
 const {countdownState} = require('./main/countdown/state');
 const {registerCountdownIpc} = require('./main/countdown/ipc');
@@ -713,8 +712,6 @@ app.whenReady().then(() => {
     electron.powerMonitor.on('shutdown', () => {
         app.quit()
     })
-    const handle = win.getNativeWindowHandle();
-    try { DisableMinimize(handle) } catch (e) { console.warn('DisableMinimize failed:', e?.message || e) }
     setAutoLaunch()
 })
 
