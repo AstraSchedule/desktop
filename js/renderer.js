@@ -1,4 +1,4 @@
-﻿const { ipcRenderer } = require('electron');
+const { ipcRenderer } = require('electron');
 
 // 新增：深合并与用户配置加载/保存
 function isPlainObject(x) {
@@ -694,6 +694,34 @@ ipcRenderer.on('getTimeOffset', () => {
 ipcRenderer.on('setTimeOffset', (e, arg) => {
     timeOffset = arg
     localStorage.setItem('timeOffset', arg.toString())
+})
+
+// 调试矫正：发送当前课表数据给主进程
+ipcRenderer.on('getScheduleForDebugCalibration', () => {
+    const dayOfWeek = getCurrentEditedDay(getCurrentEditedDate());
+    const dailyClass = scheduleConfig.daily_class?.[dayOfWeek];
+    if (!dailyClass) {
+        ipcRenderer.send('debugCalibrationData', { classes: [], timetable: {}, subjectNames: {} });
+        return;
+    }
+    
+    const timetableKey = dailyClass.timetable;
+    const timetable = scheduleConfig.timetable?.[timetableKey] || {};
+    
+    // 获取当前周的课程列表
+    const weekNumber = weekIndex;
+    const classes = dailyClass.classList?.map(subject => {
+        if (Array.isArray(subject)) {
+            return subject[weekNumber] || subject[0];
+        }
+        return subject;
+    }) || [];
+    
+    ipcRenderer.send('debugCalibrationData', {
+        classes,
+        timetable,
+        subjectNames: scheduleConfig.subject_name || {}
+    });
 })
 
 ipcRenderer.on('fromCloud', () => {

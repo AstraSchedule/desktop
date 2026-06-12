@@ -895,25 +895,40 @@ ipcMain.on('getWeekIndex', (e, arg) => {
             }
         },
         {
+            type: 'separator'
+        },
+        {
             icon: asset('image', 'toggle.png'),
-            label: '调试输入',
-            click: () => {
-                prompt({
-                    title: '调试输入',
-                    label: '',
-                    value: store.get('debugInputValue', '0'),
-                    inputAttrs: {
-                        type: 'string'
-                    },
-                    type: 'input',
-                    height: 140,
-                    width: 300,
-                }).then((r) => {
-                    if (r === null) return
-                    store.set('debugInputValue', r.toString())
-                    win.webContents.send('debugInputChanged', r.toString())
-                })
-            }
+            label: '调试选项',
+            submenu: [
+                {
+                    label: '调试输入',
+                    click: () => {
+                        prompt({
+                            title: '调试输入',
+                            label: '',
+                            value: store.get('debugInputValue', '0'),
+                            inputAttrs: {
+                                type: 'string'
+                            },
+                            type: 'input',
+                            height: 140,
+                            width: 300,
+                        }).then((r) => {
+                            if (r === null) return
+                            store.set('debugInputValue', r.toString())
+                            win.webContents.send('debugInputChanged', r.toString())
+                        })
+                    }
+                },
+                {
+                    label: '调试矫正',
+                    click: () => {
+                        // 从渲染进程获取当前课表数据
+                        win.webContents.send('getScheduleForDebugCalibration');
+                    }
+                },
+            ]
         },
         {
             icon: asset('image', 'github.png'),
@@ -1225,6 +1240,119 @@ ipcMain.on('getTimeOffset', (e, arg) => {
             win.webContents.send('setTimeOffset', Number(r) % 10000000000000)
         }
     })
+})
+
+// 调试矫正：接收渲染进程发来的课表数据，执行矫正逻辑
+ipcMain.on('debugCalibrationData', (e, arg) => {
+    const { classes, timetable, subjectNames } = arg;
+    const timeRanges = Object.keys(timetable);
+
+    // 构建课节选项
+    const classOptions = [];
+    const classTimeMap = new Map();
+
+    for (const range of timeRanges) {
+        const classIndex = timetable[range];
+        if (typeof classIndex === 'number') {
+            const [start, end] = range.split('-');
+            if (!classTimeMap.has(classIndex)) {
+                classTimeMap.set(classIndex, { startTime: start, endTime: end });
+                const subjectShort = classes[classIndex] || `未知${classIndex}`;
+                const subjectFull = subjectNames[subjectShort] || subjectShort;
+                classOptions.push({
+                    index: classIndex,
+                    label: `第 ${classIndex + 1} 节: ${subjectFull}`,
+                    startTime: start,
+                    endTime: end
+                });
+            }
+        }
+    }
+
+    if (classOptions.length === 0) {
+        dialog.showErrorBox('调试矫正', '当前时间表为空，请先配置课表');
+        return;
+    }
+
+    // 第一步：选择课节
+    dialog.showMessageBox(win, {
+        type: 'question',
+        title: '调试矫正 - 选择课节',
+        message: '请选择要矫正到的课节：',
+        buttons: [...classOptions.map(o => o.label), '取消'],
+        defaultId: 0,
+        cancelId: classOptions.length,
+    }).then(({ response }) => {
+        if (response === classOptions.length) return;
+
+        const selected = classOptions[response];
+
+        // 第二步：选择前/后
+        dialog.showMessageBox(win, {
+            type: 'question',
+            title: '调试矫正 - 选择时机',
+            message: `要矫正到 "${selected.label}" 的什么时间点？`,
+            buttons: ['上课前', '下课后', '取消'],
+            defaultId: 0,
+            cancelId: 2,
+        }).then(({ response: timingResponse }) => {
+            if (timingResponse === 2) return;
+
+            const isBefore = timingResponse === 0;
+
+            // 第三步：输入秒数
+            prompt({
+                title: '调试矫正 - 输入秒数',
+                label: `矫正到${isBefore ? '上课前' : '下课后'}多少秒？`,
+                value: '5',
+                inputAttrs: {
+                    type: 'number'
+                },
+                type: 'input',
+                height: 180,
+                width: 400,
+            }).then((r) => {
+                if (r === null) return;
+
+                const seconds = parseInt(r, 10);
+                if (isNaN(seconds)) {
+                    dialog.showErrorBox('调试矫正', '请输入有效的秒数');
+                    return;
+                }
+
+                                    // 计算目标时间
+                                    const targetTime = isBefore ? selected.startTime : selected.endTime;
+                                    const [targetH, targetM] = targetTime.split(':').map(Number);
+                                    let targetSeconds = targetH * 3600 + targetM * 60;
+                                    
+                                    // timetable 结束时间比实际少1分钟，下课后需加60秒
+                                    if (!isBefore) {
+                                        targetSeconds += 60;
+                                    }
+
+                // 当前系统时间（秒）
+                const now = new Date();
+                const currentSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+
+                // 计算偏移量：目标时间 - 当前时间 +/- n秒
+                let offset = targetSeconds - currentSeconds;
+                if (isBefore) {
+                    offset -= seconds; // 上课前n秒
+                } else {
+                    offset += seconds; // 下课后n秒
+                }
+
+                // 应用偏移
+                win.webContents.send('setTimeOffset', offset % 10000000000000);
+                dialog.showMessageBox(win, {
+                    type: 'info',
+                    title: '调试矫正',
+                    message: `已设置偏移 ${offset} 秒\n目标时间: ${targetTime} ${isBefore ? '前' : '后'} ${seconds} 秒`,
+                    buttons: ['确定']
+                });
+            });
+        });
+    });
 })
 
 ipcMain.on('fromCloud', (e, arg) => {
