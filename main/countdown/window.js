@@ -45,6 +45,7 @@ function ensureCountdownWindow(ctx) {
         skipTaskbar: true,
         focusable: false,
         fullscreenable: false,
+        type: 'toolbar',
         show: false,
         alwaysOnTop: false,
         autoHideMenuBar: true,
