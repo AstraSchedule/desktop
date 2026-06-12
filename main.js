@@ -90,8 +90,6 @@ const countdownCtx = {
     ipcMain,
     net: electron.net,
     state: countdownState,
-    getServer,
-    getProtocols,
     getClassId: () => classId,
 };
 
