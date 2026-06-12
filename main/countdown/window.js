@@ -45,6 +45,7 @@ function ensureCountdownWindow(ctx) {
         skipTaskbar: true,
         focusable: false,
         fullscreenable: false,
+        type: 'toolbar',
         show: false,
         alwaysOnTop: false,
         autoHideMenuBar: true,
@@ -112,7 +113,6 @@ function setMinimizedMode(ctx, minimized) {
 }
 
 module.exports = {
-    ensureCountdownWindow,
     showCountdownWindow,
     hideCountdownWindow,
     setMinimizedMode,

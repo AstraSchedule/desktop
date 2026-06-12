@@ -7,6 +7,7 @@ const countdownState = {
     firstSuccessLocked: false,
     latestItems: [],
     loading: false,
+    scheduleCountdownRecords: [],
 };
 
 module.exports = {

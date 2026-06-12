@@ -9,8 +9,7 @@
     "debug": "electron . --enable-logging",
     "rebuild": "electron-rebuild",
     "build": "electron-builder --win --ia32",
-    "ci": "electron-builder --win --ia32 --publish always",
-    "postinstall": "electron-builder install-app-deps"
+    "ci": "electron-builder --win --ia32 --publish always"
   },
   "devDependencies": {
     "@electron/packager": "^19.0.1",
@@ -20,17 +19,16 @@
     "electron-packager": "^17.1.2"
   },
   "dependencies": {
-    "electron-disable-minimize": "^2.1.0",
     "electron-prompt": "^1.7.0",
     "electron-store": "^8.1.0",
     "electron-updater": "^6.3.9",
     "fstream": "1.0.12",
-    "node-gyp": "^12.2.0",
     "windows-shortcuts": "^0.1.6",
     "ws": "^8.18.0"
   },
   "build": {
     "appId": "cn.khbit.classschedule",
+    "icon": "image/appIcon.png",
     "productName": "星程课表",
     "asar": true,
     "asarUnpack": [

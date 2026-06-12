@@ -723,14 +723,97 @@ ipcRenderer.on('setCloudSec', (e, arg) => {
 // 小函数：温度与天气状态更新
 function applyTemperature(arg){
     if (!temperature || !weather) return; // DOM 未就绪时跳过，避免警告
-    const t = Number(arg['temp'])
-    temperature.innerText = (Number.isNaN(t) ? '-' : t) + "℃"
-    if (!Number.isNaN(t)) {
-        if (t < 24) temperature.style.color = "#66CCFF"
-        else if (t <= 26) temperature.style.color = "#5FBC21"
-        else temperature.style.color = "#EE0000"
+    const rawTemp = Number(arg['temp'])
+    // 应用调试输入偏移值
+    const offset = Number(scheduleConfig.debug_input_value || '0')
+    const t = isNaN(rawTemp) ? NaN : (rawTemp + offset)
+    temperature.innerText = (isNaN(t) ? '-' : t) + "℃"
+    if (!isNaN(t)) {
+        const cfg = scheduleConfig.temperature_colors
+        if (cfg && cfg.stops && cfg.stops.length > 0) {
+            if (cfg.use_gradient) {
+                // 渐变模式：在相邻端点间线性插值（函数在 Task 7 中实现）
+                if (typeof interpolateGradientColor === 'function') {
+                    temperature.style.color = interpolateGradientColor(t, cfg.stops)
+                } else {
+                    // 回退到离散模式
+                    for (const stop of cfg.stops) {
+                        if (t < stop.temp) {
+                            temperature.style.color = stop.color
+                            break
+                        }
+                    }
+                }
+            } else {
+                // 离散模式：遍历 stops，找首个 t < stop.temp 的端点，使用其颜色
+                let matched = false
+                for (const stop of cfg.stops) {
+                    if (t < stop.temp) {
+                        temperature.style.color = stop.color
+                        matched = true
+                        break
+                    }
+                }
+                // 如果所有 stops 都不满足（t >= 所有 stop.temp），使用最后一个 stop 的颜色
+                if (!matched && cfg.stops.length > 0) {
+                    temperature.style.color = cfg.stops[cfg.stops.length - 1].color
+                }
+            }
+        } else {
+            // 配置不存在时的回退行为（保持原硬编码逻辑）
+            if (t < 24) temperature.style.color = "#66CCFF"
+            else if (t <= 26) temperature.style.color = "#5FBC21"
+            else temperature.style.color = "#EE0000"
+        }
     }
     weather.innerText = String(arg['weat'] ?? '')
+}
+
+// 颜色插值辅助：在两个 hex 颜色间按比例线性插值（RGB 空间）
+function lerpColor(c1, c2, ratio) {
+    const r1 = parseInt(c1.slice(1, 3), 16)
+    const g1 = parseInt(c1.slice(3, 5), 16)
+    const b1 = parseInt(c1.slice(5, 7), 16)
+    const r2 = parseInt(c2.slice(1, 3), 16)
+    const g2 = parseInt(c2.slice(3, 5), 16)
+    const b2 = parseInt(c2.slice(5, 7), 16)
+    const r = Math.round(r1 + (r2 - r1) * ratio)
+    const g = Math.round(g1 + (g2 - g1) * ratio)
+    const b = Math.round(b1 + (b2 - b1) * ratio)
+    return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('')
+}
+
+// 渐变颜色插值：根据温度在温度-颜色端点间插值（与离散模式使用相同区间匹配逻辑）
+function interpolateGradientColor(t, stops) {
+    const sorted = [...stops].sort((a, b) => a.temp - b.temp)
+    if (sorted.length === 0) return '#000000'
+    if (sorted.length === 1) return sorted[0].color
+
+    // 与离散模式相同的匹配逻辑：找到第一个 t < stop.temp 的端点
+    let matchedIndex = -1
+    for (let i = 0; i < sorted.length; i++) {
+        if (t < sorted[i].temp) {
+            matchedIndex = i
+            break
+        }
+    }
+
+    // 超出所有端点范围，使用最后一个端点的颜色
+    if (matchedIndex === -1) return sorted[sorted.length - 1].color
+    // 低于第一个端点，使用第一个端点的颜色
+    if (matchedIndex === 0) return sorted[0].color
+
+    // t 落在区间 [sorted[matchedIndex-1].temp, sorted[matchedIndex].temp)
+    // 离散模式会使用 sorted[matchedIndex].color
+    // 渐变模式：在两相邻端点间插值，使用非线性曲线让颜色更快趋近匹配区间的颜色
+    const prevStop = sorted[matchedIndex - 1]
+    const currStop = sorted[matchedIndex]
+    const rangeWidth = currStop.temp - prevStop.temp
+    const distFromLower = t - prevStop.temp
+    const linearRatio = distFromLower / rangeWidth
+    // 指数 < 1 使颜色在区间前半段快速趋近目标色（如 30~35°C 区间内 31°C 已明显偏橙）
+    const ratio = Math.pow(linearRatio, 0.35)
+    return lerpColor(prevStop.color, currStop.color, ratio)
 }
 
 // 辅助：标准化字符串
@@ -770,6 +853,10 @@ function recomputeWeatherWarnFromLast() {
 
 ipcRenderer.on('newConfig', (e, arg) => {
     // 云端下发的配置仅在当前会话生效，不写入本地用户配置
+    // 保留本地调试输入值，避免被云端配置覆盖
+    if (arg && !('debug_input_value' in arg)) {
+        arg.debug_input_value = scheduleConfig.debug_input_value
+    }
     scheduleConfig = arg
     for (const key in scheduleConfig.css_style) {
         root.style.setProperty(key, scheduleConfig.css_style[key])
@@ -849,6 +936,14 @@ ipcRenderer.on('setWeather', (e, arg) => {
         setBanner();
     } else {
         console.log('[Weather] drop outdated ts=', ts, 'currentTs=', weatherWarnTs, 'candidate=', candidate);
+    }
+})
+
+ipcRenderer.on('debugInputChanged', (e, value) => {
+    scheduleConfig.debug_input_value = value
+    // 如果有缓存的天气数据，立即重新渲染温度颜色
+    if (lastWeatherPayload) {
+        applyTemperature(lastWeatherPayload)
     }
 })
 

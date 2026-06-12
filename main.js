@@ -7,11 +7,10 @@ const createShortcut = require('windows-shortcuts')
 const startupFolderPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup');
 const prompt = require('electron-prompt');
 const Store = require('electron-store');
-const { DisableMinimize } = require('electron-disable-minimize');
 const store = new Store();
 const {countdownState} = require('./main/countdown/state');
 const {registerCountdownIpc} = require('./main/countdown/ipc');
-const {fetchCountdownData, pushCountdownItems} = require('./main/countdown/service');
+const {processCountdownFromSchedule, pushCountdownItems} = require('./main/countdown/service');
 const {showCountdownWindow, hideCountdownWindow} = require('./main/countdown/window');
 
 
@@ -91,8 +90,6 @@ const countdownCtx = {
     ipcMain,
     net: electron.net,
     state: countdownState,
-    getServer,
-    getProtocols,
     getClassId: () => classId,
 };
 
@@ -124,7 +121,9 @@ async function refreshCountdownWindow(reason = 'manual') {
     if (countdownState.loading) return;
     countdownState.loading = true;
     try {
-        const result = await fetchCountdownData(countdownCtx);
+        const records = countdownState.scheduleCountdownRecords || [];
+        const classId = countdownCtx.getClassId();
+        const result = processCountdownFromSchedule(records, classId);
         if (result?.loading) {
             countdownState.latestItems = [];
             hideCountdownWindow(countdownState);
@@ -171,18 +170,6 @@ async function refreshCountdownWindow(reason = 'manual') {
         countdownState.loading = false;
     }
 }
-
-function startCountdownPolling() {
-    if (countdownState.pollTimer) {
-        clearInterval(countdownState.pollTimer);
-        countdownState.pollTimer = null;
-    }
-    countdownState.pollTimer = setInterval(() => {
-        refreshCountdownWindow('poll').catch(() => {
-        });
-    }, 30000);
-}
-
 const WebSocket = require('ws');
 let ws;
 let heartbeatTimer = null;
@@ -680,6 +667,11 @@ function getScheduleFromCloud() {
                     connect();
                 }
 
+                // 缓存倒数日数据，供 countdown 窗口使用
+                countdownState.scheduleCountdownRecords = Array.isArray(scheduleConfigSync.countdown_records)
+                    ? scheduleConfigSync.countdown_records
+                    : [];
+
                 if (win && !win.isDestroyed()) win.webContents.send('newConfig', scheduleConfigSync)
                 refreshCountdownWindow('schedule-sync').catch(() => {
                 })
@@ -718,8 +710,6 @@ app.whenReady().then(() => {
     electron.powerMonitor.on('shutdown', () => {
         app.quit()
     })
-    const handle = win.getNativeWindowHandle();
-    try { DisableMinimize(handle) } catch (e) { console.warn('DisableMinimize failed:', e?.message || e) }
     setAutoLaunch()
 })
 
@@ -746,7 +736,7 @@ ipcMain.on('getWeekIndex', (e, arg) => {
             console.error('Failed to destroy tray:', err);
         }
     }
-    tray = new Tray(asset('image', 'icon.png'))
+    tray = new Tray(asset('image', store.get('trayIcon', 'icon') + '.png'))
     template = [
         {
             label: '连接云端',
@@ -905,6 +895,27 @@ ipcMain.on('getWeekIndex', (e, arg) => {
             }
         },
         {
+            icon: asset('image', 'toggle.png'),
+            label: '调试输入',
+            click: () => {
+                prompt({
+                    title: '调试输入',
+                    label: '',
+                    value: store.get('debugInputValue', '0'),
+                    inputAttrs: {
+                        type: 'string'
+                    },
+                    type: 'input',
+                    height: 140,
+                    width: 300,
+                }).then((r) => {
+                    if (r === null) return
+                    store.set('debugInputValue', r.toString())
+                    win.webContents.send('debugInputChanged', r.toString())
+                })
+            }
+        },
+        {
             icon: asset('image', 'github.png'),
             label: '源码仓库',
             click: () => {
@@ -961,6 +972,18 @@ ipcMain.on('getWeekIndex', (e, arg) => {
             click: (e) => {
                 store.set('isAutoLaunch', e.checked)
                 setAutoLaunch()
+            }
+        },
+        {
+            icon: asset('image', 'toggle.png'),
+            label: '切换图标',
+            click: () => {
+                const current = store.get('trayIcon', 'icon');
+                const newIcon = current === 'icon' ? 'appIcon' : 'icon';
+                store.set('trayIcon', newIcon);
+                if (tray && !tray.isDestroyed()) {
+                    tray.setImage(asset('image', newIcon + '.png'));
+                }
             }
         },
         {
@@ -1269,7 +1292,7 @@ ipcMain.on('setClass', (e, arg) => {
 })
 
 // 添加 IPC 事件处理器，用于处理来自渲染进程的 getScheduleFromCloud 请求
-ipcMain.on('getScheduleFromCloud', (e, arg) => {
+ipcMain.on('getScheduleFromCloud', () => {
     // 直接调用 getScheduleFromCloud 函数
     getScheduleFromCloud();
 });
