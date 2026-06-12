@@ -155,7 +155,16 @@ function pushCountdownItems(state) {
     });
 }
 
+function processCountdownFromSchedule(records, classId) {
+    const items = collectEffectiveSchedules(records, classId).map((it) => ({
+        ...it,
+        text: formatCountdownText(it.name, it.daysLeft),
+    }));
+    return {loading: false, items};
+}
+
 module.exports = {
     fetchCountdownData,
+    processCountdownFromSchedule,
     pushCountdownItems,
 };

@@ -49,8 +49,7 @@ function createItemNode(item, isPrimary) {
     const days = document.createElement('div');
     days.className = 'days';
     days.innerText = daysText;
-    const urgencyColor = getUrgencyColor(daysLeft);
-    days.style.color = urgencyColor;
+    days.style.color = getUrgencyColor(daysLeft);
 
     const sentence = document.createElement('div');
     sentence.className = 'sentence';
@@ -103,7 +102,21 @@ function renderMinimized(layoutRoot, items) {
     line.className = 'mini-line';
     const daysLeft = Number(top?.daysLeft || 0);
     const name = String(top?.name || '目标');
-    line.innerText = daysLeft === 0 ? `${name} 就是今天` : `距离 ${name} 还有 ${daysLeft} 天`;
+    const text = daysLeft === 0 ? `${name} 就是今天` : `距离 ${name} 还有 ${daysLeft} 天`;
+
+    const re = /([^\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]+)|([\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]+)/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+        if (m[1]) {
+            const span = document.createElement('span');
+            span.className = 'mini-num';
+            span.textContent = m[1];
+            line.appendChild(span);
+        } else {
+            line.appendChild(document.createTextNode(m[2]));
+        }
+    }
+
     const urgencyColor = getUrgencyColor(daysLeft);
     line.style.color = urgencyColor;
     line.style.borderColor = urgencyColor;

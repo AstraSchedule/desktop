@@ -11,7 +11,7 @@ const { DisableMinimize } = require('electron-disable-minimize');
 const store = new Store();
 const {countdownState} = require('./main/countdown/state');
 const {registerCountdownIpc} = require('./main/countdown/ipc');
-const {fetchCountdownData, pushCountdownItems} = require('./main/countdown/service');
+const {processCountdownFromSchedule, pushCountdownItems} = require('./main/countdown/service');
 const {showCountdownWindow, hideCountdownWindow} = require('./main/countdown/window');
 
 
@@ -124,7 +124,9 @@ async function refreshCountdownWindow(reason = 'manual') {
     if (countdownState.loading) return;
     countdownState.loading = true;
     try {
-        const result = await fetchCountdownData(countdownCtx);
+        const records = countdownState.scheduleCountdownRecords || [];
+        const classId = countdownCtx.getClassId();
+        const result = processCountdownFromSchedule(records, classId);
         if (result?.loading) {
             countdownState.latestItems = [];
             hideCountdownWindow(countdownState);
@@ -171,18 +173,6 @@ async function refreshCountdownWindow(reason = 'manual') {
         countdownState.loading = false;
     }
 }
-
-function startCountdownPolling() {
-    if (countdownState.pollTimer) {
-        clearInterval(countdownState.pollTimer);
-        countdownState.pollTimer = null;
-    }
-    countdownState.pollTimer = setInterval(() => {
-        refreshCountdownWindow('poll').catch(() => {
-        });
-    }, 30000);
-}
-
 const WebSocket = require('ws');
 let ws;
 let heartbeatTimer = null;
@@ -679,6 +669,11 @@ function getScheduleFromCloud() {
                     }
                     connect();
                 }
+
+                // 缓存倒数日数据，供 countdown 窗口使用
+                countdownState.scheduleCountdownRecords = Array.isArray(scheduleConfigSync.countdown_records)
+                    ? scheduleConfigSync.countdown_records
+                    : [];
 
                 if (win && !win.isDestroyed()) win.webContents.send('newConfig', scheduleConfigSync)
                 refreshCountdownWindow('schedule-sync').catch(() => {
@@ -1302,7 +1297,7 @@ ipcMain.on('setClass', (e, arg) => {
 })
 
 // 添加 IPC 事件处理器，用于处理来自渲染进程的 getScheduleFromCloud 请求
-ipcMain.on('getScheduleFromCloud', (e, arg) => {
+ipcMain.on('getScheduleFromCloud', () => {
     // 直接调用 getScheduleFromCloud 函数
     getScheduleFromCloud();
 });
