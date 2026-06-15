@@ -10,8 +10,6 @@ function getWindowsMajorVersion() {
 
 function isAeroEnabled() {
     // isAeroGlassEnabled() 检测 DWM 合成（Aero 玻璃效果），适用于 Win7
-    // 注意：该 API 在 Electron 中 deprecated，但官方推荐的 shouldUseDarkColors
-    // 只能检测深色/浅色模式，无法区分 Aero/Basic，所以这里继续使用原 API
     if (typeof systemPreferences.isAeroGlassEnabled !== 'function') {
         return true;  // API 不存在时假定 Aero 可用，避免误退出
     }
