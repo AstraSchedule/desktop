@@ -690,7 +690,13 @@ function getScheduleFromCloud() {
     })
     request.end()
 }
+const { startAeroMonitoring, stopAeroMonitoring } = require('./main/aeroCheck');
+
 app.whenReady().then(() => {
+    if (startAeroMonitoring()) {
+        // Aero 检查失败，app.quit() 已调用，直接返回
+        return;
+    }
     createWindow()
     Menu.setApplicationMenu(null)
     registerCountdownIpc(countdownCtx)
@@ -714,6 +720,7 @@ app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
+    stopAeroMonitoring()
     clearCountdownStartupRetryTimer()
     if (countdownState.pollTimer) {
         clearInterval(countdownState.pollTimer)
