@@ -9,34 +9,18 @@ function getWindowsMajorVersion() {
 }
 
 function isAeroEnabled() {
-    // 主要方法：使用 Electron 原生 API（deprecated 但仍可用）
-    if (typeof systemPreferences.isAeroGlassEnabled === 'function') {
-        try {
-            return systemPreferences.isAeroGlassEnabled();
-        } catch (e) {
-            console.error('[AeroCheck] isAeroGlassEnabled() failed:', e);
-        }
+    // isAeroGlassEnabled() 检测 DWM 合成（Aero 玻璃效果），适用于 Win7
+    // 注意：该 API 在 Electron 中 deprecated，但官方推荐的 shouldUseDarkColors
+    // 只能检测深色/浅色模式，无法区分 Aero/Basic，所以这里继续使用原 API
+    if (typeof systemPreferences.isAeroGlassEnabled !== 'function') {
+        return true;  // API 不存在时假定 Aero 可用，避免误退出
     }
-
-    // 备用方法：通过系统颜色检测（Basic 主题颜色特征不同）
     try {
-        if (typeof systemPreferences.getColor === 'function') {
-            const caption = systemPreferences.getColor('activeCaption');
-            // Windows 7 Basic 主题的 activeCaption 通常是纯色（如 #0055EE）
-            // 而 Aero 主题通常是渐变或半透明色
-            // 简单检测：如果颜色值较短（纯色），可能是 Basic 主题
-            if (caption && caption.length <= 7) {
-                console.log('[AeroCheck] Detected Basic theme via color:', caption);
-                return false;
-            }
-        }
+        return systemPreferences.isAeroGlassEnabled();
     } catch (e) {
-        console.error('[AeroCheck] Color detection failed:', e);
+        console.error('[AeroCheck] isAeroGlassEnabled() failed:', e);
+        return true;
     }
-
-    // 所有方法都失败时，假定 Aero 可用（安全降级）
-    console.log('[AeroCheck] Cannot determine Aero status, assuming enabled');
-    return true;
 }
 
 function shouldCheckAero() {
