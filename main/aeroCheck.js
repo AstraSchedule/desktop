@@ -9,15 +9,34 @@ function getWindowsMajorVersion() {
 }
 
 function isAeroEnabled() {
-    if (typeof systemPreferences.isAeroGlassEnabled !== 'function') {
-        return true;
+    // 主要方法：使用 Electron 原生 API（deprecated 但仍可用）
+    if (typeof systemPreferences.isAeroGlassEnabled === 'function') {
+        try {
+            return systemPreferences.isAeroGlassEnabled();
+        } catch (e) {
+            console.error('[AeroCheck] isAeroGlassEnabled() failed:', e);
+        }
     }
+
+    // 备用方法：通过系统颜色检测（Basic 主题颜色特征不同）
     try {
-        return systemPreferences.isAeroGlassEnabled();
+        if (typeof systemPreferences.getColor === 'function') {
+            const caption = systemPreferences.getColor('activeCaption');
+            // Windows 7 Basic 主题的 activeCaption 通常是纯色（如 #0055EE）
+            // 而 Aero 主题通常是渐变或半透明色
+            // 简单检测：如果颜色值较短（纯色），可能是 Basic 主题
+            if (caption && caption.length <= 7) {
+                console.log('[AeroCheck] Detected Basic theme via color:', caption);
+                return false;
+            }
+        }
     } catch (e) {
-        console.error('[AeroCheck] Failed to check Aero status:', e);
-        return true;
+        console.error('[AeroCheck] Color detection failed:', e);
     }
+
+    // 所有方法都失败时，假定 Aero 可用（安全降级）
+    console.log('[AeroCheck] Cannot determine Aero status, assuming enabled');
+    return true;
 }
 
 function shouldCheckAero() {
