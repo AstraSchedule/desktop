@@ -528,8 +528,7 @@ function checkNetworkConnection() {
         // 尝试连接到服务器的根路径（轻量级检查）
         const request = net.request({
             method: 'GET',
-            url: `${agreement}://${server}/`,
-            timeout: 5000
+            url: `${agreement}://${server}/`
         })
 
         let isResolved = false
@@ -702,7 +701,7 @@ app.whenReady().then(() => {
     registerCountdownIpc(countdownCtx)
     setupAutoUpdater()
     // 先进行网络连接检查，然后获取课表数据
-    getScheduleFromCloudWithRetry();
+    getScheduleFromCloudWithRetry().then(() => {});
     refreshCountdownWindow('startup').catch(() => {
     })
     win.webContents.on('did-finish-load', () => {
@@ -1321,8 +1320,8 @@ ipcMain.on('debugCalibrationData', (e, arg) => {
             }).then((r) => {
                 if (r === null) return;
 
-                const seconds = parseInt(r, 10);
-                if (isNaN(seconds)) {
+                const seconds = Number.parseInt(r, 10);
+                if (Number.isNaN(seconds)) {
                     dialog.showErrorBox('调试矫正', '请输入有效的秒数');
                     return;
                 }
@@ -1331,7 +1330,7 @@ ipcMain.on('debugCalibrationData', (e, arg) => {
                                     const targetTime = isBefore ? selected.startTime : selected.endTime;
                                     const [targetH, targetM] = targetTime.split(':').map(Number);
                                     let targetSeconds = targetH * 3600 + targetM * 60;
-                                    
+
                                     // timetable 结束时间比实际少1分钟，下课后需加60秒
                                     if (!isBefore) {
                                         targetSeconds += 60;
@@ -1356,7 +1355,7 @@ ipcMain.on('debugCalibrationData', (e, arg) => {
                     title: '调试矫正',
                     message: `已设置偏移 ${offset} 秒\n目标时间: ${targetTime} ${isBefore ? '前' : '后'} ${seconds} 秒`,
                     buttons: ['确定']
-                });
+                }).then();
             });
         });
     });

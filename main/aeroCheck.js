@@ -4,8 +4,8 @@ const os = require('node:os');
 function getWindowsMajorVersion() {
     if (process.platform !== 'win32') return null;
     const version = os.release();
-    const match = version.match(/^(\d+)\./);
-    return match ? parseInt(match[1], 10) : null;
+    const match = new RegExp(/^(\d+)\./).exec(version);
+    return match ? Number.parseInt(match[1], 10) : null;
 }
 
 function isAeroEnabled() {
