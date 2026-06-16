@@ -655,20 +655,6 @@ function getScheduleFromCloud() {
                     }
                 }
 
-                // 首次成功获取配置时，根据 startup_behavior 决定窗口行为
-                if (!hasShownWindow && isFromCloud) {
-                    const startupBehavior = scheduleConfigSync.startup_behavior || 'normal'
-                    console.log(`[Startup] startup_behavior=${startupBehavior}`)
-                    if (startupBehavior === 'exit') {
-                        console.log('[Startup] startup_behavior is exit, quitting app...')
-                        app.quit()
-                        return
-                    } else if (startupBehavior === 'normal') {
-                        showMainWindow()
-                    }
-                    // startupBehavior === 'stay' 时保持隐藏
-                }
-
                 // 检查是否含有 supportWebSocket 键
                 const supportWebSocket = scheduleConfigSync["supportWebSocket"] !== undefined ?
                     Boolean(scheduleConfigSync["supportWebSocket"]) : true;
@@ -698,6 +684,21 @@ function getScheduleFromCloud() {
                     : [];
 
                 if (win && !win.isDestroyed()) win.webContents.send('newConfig', scheduleConfigSync)
+
+                // 在发送配置后，根据 startup_behavior 决定窗口行为
+                if (!hasShownWindow && isFromCloud) {
+                    const startupBehavior = scheduleConfigSync.startup_behavior || 'normal'
+                    console.log(`[Startup] startup_behavior=${startupBehavior}`)
+                    if (startupBehavior === 'exit') {
+                        console.log('[Startup] startup_behavior is exit, quitting app...')
+                        app.quit()
+                        return
+                    } else if (startupBehavior === 'normal') {
+                        showMainWindow()
+                    }
+                    // startupBehavior === 'stay' 时保持隐藏
+                }
+
                 refreshCountdownWindow('schedule-sync').catch(() => {
                 })
             } catch (err) {
