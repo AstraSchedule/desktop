@@ -113,6 +113,8 @@ function setMinimizedMode(ctx, minimized) {
 }
 
 module.exports = {
+    ensureCountdownWindow,
+    applyModeBounds,
     showCountdownWindow,
     hideCountdownWindow,
     setMinimizedMode,

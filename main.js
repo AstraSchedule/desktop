@@ -11,7 +11,7 @@ const store = new Store();
 const {countdownState} = require('./main/countdown/state');
 const {registerCountdownIpc} = require('./main/countdown/ipc');
 const {processCountdownFromSchedule, pushCountdownItems} = require('./main/countdown/service');
-const {showCountdownWindow, hideCountdownWindow} = require('./main/countdown/window');
+const {ensureCountdownWindow, applyModeBounds, showCountdownWindow, hideCountdownWindow} = require('./main/countdown/window');
 
 
 
@@ -83,6 +83,7 @@ function getServer() {
 }
 let classId = String(store.get("class", "39/2023/1"))
 let isFromCloud = store.get('isFromCloud', false)
+let lastScheduleConfig = null
 console.log('Class:', classId, 'Server:', getServer(), 'Secure:', store.get("isSecureConnection", true), 'Cloud:', isFromCloud);
 
 const countdownCtx = {
@@ -119,6 +120,10 @@ async function refreshCountdownWindow(reason = 'manual') {
         // 首次成功后保持当前显示状态，不再触发刷新/隐藏逻辑
         return;
     }
+    if (countdownState.startupBehavior === 'stay') {
+        // 滞留模式：不创建/显示倒数日窗口
+        return;
+    }
     if (countdownState.loading) return;
     countdownState.loading = true;
     try {
@@ -143,14 +148,22 @@ async function refreshCountdownWindow(reason = 'manual') {
         }
 
         countdownState.latestItems = items;
-        const cwin = showCountdownWindow(countdownCtx);
+        const cwin = ensureCountdownWindow(countdownCtx);
+        applyModeBounds(cwin, countdownCtx.screen, countdownState.minimized, items.length || 1);
         if (cwin && !cwin.isDestroyed() && cwin.webContents && !cwin.webContents.isDestroyed()) {
+            const revealWindow = () => {
+                if (!cwin.isDestroyed() && !cwin.isVisible()) {
+                    cwin.showInactive();
+                }
+            };
             if (cwin.webContents.isLoading()) {
                 cwin.webContents.once('did-finish-load', () => {
                     pushCountdownItems(countdownState);
+                    revealWindow();
                 });
             } else {
                 pushCountdownItems(countdownState);
+                revealWindow();
             }
         }
         countdownState.firstSuccessLocked = true;
@@ -682,8 +695,10 @@ function getScheduleFromCloud() {
                 countdownState.scheduleCountdownRecords = Array.isArray(scheduleConfigSync.countdown_records)
                     ? scheduleConfigSync.countdown_records
                     : [];
+                countdownState.startupBehavior = scheduleConfigSync.startup_behavior || 'normal';
 
                 if (win && !win.isDestroyed()) win.webContents.send('newConfig', scheduleConfigSync)
+                lastScheduleConfig = scheduleConfigSync
 
                 // 在发送配置后，根据 startup_behavior 决定窗口行为
                 if (!hasShownWindow && isFromCloud) {
@@ -737,7 +752,9 @@ app.whenReady().then(() => {
     })
     win.webContents.on('did-finish-load', () => {
         win.webContents.send('getWeekIndex');
-
+        if (lastScheduleConfig) {
+            win.webContents.send('newConfig', lastScheduleConfig)
+        }
     })
     // powerMonitor 事件无 preventDefault
     electron.powerMonitor.on('suspend', () => {
@@ -1393,7 +1410,7 @@ ipcMain.on('debugCalibrationData', (e, arg) => {
     });
 })
 
-ipcMain.on('fromCloud', (e, arg) => {
+ipcMain.on('fromCloud', () => {
     prompt({
         title: '云端服务',
         label: '请设置云端服务：',
@@ -1417,7 +1434,7 @@ ipcMain.on('fromCloud', (e, arg) => {
 })
 
 // 新增：处理“所在班级”提示框与保存
-ipcMain.on('setClass', (e, arg) => {
+ipcMain.on('setClass', () => {
     prompt({
         title: '所在班级',
         label: '请输入班级标识(例如 39/2023/1)：',

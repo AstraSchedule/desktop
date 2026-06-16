@@ -284,6 +284,7 @@ function setScheduleClass() {
             classHtml += '<div class="divider"></div>'
     }
     classContainer.innerHTML = classHtml
+    console.log('[DEBUG] setScheduleClass done, highlighted exists:', !!document.getElementById('highlighted'), 'classContainer children:', classContainer.childElementCount)
 
     // 使用统一规则设置 banner
     setBanner();
@@ -619,9 +620,12 @@ async function initDomAndStart() {
     }
 
     rendererReady = true;
+    console.log('[DEBUG] rendererReady set to true, pendingConfig:', !!pendingConfig)
     if (pendingConfig) {
+        console.log('[DEBUG] applying pendingConfig now')
         applyNewConfig(pendingConfig);
         pendingConfig = null;
+        console.log('[DEBUG] pendingConfig applied and cleared')
     }
 }
 
@@ -712,10 +716,10 @@ ipcRenderer.on('getScheduleForDebugCalibration', () => {
         ipcRenderer.send('debugCalibrationData', { classes: [], timetable: {}, subjectNames: {} });
         return;
     }
-    
+
     const timetableKey = dailyClass.timetable;
     const timetable = scheduleConfig.timetable?.[timetableKey] || {};
-    
+
     // 获取当前周的课程列表
     const weekNumber = weekIndex;
     const classes = dailyClass.classList?.map(subject => {
@@ -724,7 +728,7 @@ ipcRenderer.on('getScheduleForDebugCalibration', () => {
         }
         return subject;
     }) || [];
-    
+
     ipcRenderer.send('debugCalibrationData', {
         classes,
         timetable,
@@ -807,12 +811,12 @@ function applyTemperature(arg){
 
 // 颜色插值辅助：在两个 hex 颜色间按比例线性插值（RGB 空间）
 function lerpColor(c1, c2, ratio) {
-    const r1 = parseInt(c1.slice(1, 3), 16)
-    const g1 = parseInt(c1.slice(3, 5), 16)
-    const b1 = parseInt(c1.slice(5, 7), 16)
-    const r2 = parseInt(c2.slice(1, 3), 16)
-    const g2 = parseInt(c2.slice(3, 5), 16)
-    const b2 = parseInt(c2.slice(5, 7), 16)
+    const r1 = Number.parseInt(c1.slice(1, 3), 16)
+    const g1 = Number.parseInt(c1.slice(3, 5), 16)
+    const b1 = Number.parseInt(c1.slice(5, 7), 16)
+    const r2 = Number.parseInt(c2.slice(1, 3), 16)
+    const g2 = Number.parseInt(c2.slice(3, 5), 16)
+    const b2 = Number.parseInt(c2.slice(5, 7), 16)
     const r = Math.round(r1 + (r2 - r1) * ratio)
     const g = Math.round(g1 + (g2 - g1) * ratio)
     const b = Math.round(b1 + (b2 - b1) * ratio)
@@ -835,7 +839,7 @@ function interpolateGradientColor(t, stops) {
     }
 
     // 超出所有端点范围，使用最后一个端点的颜色
-    if (matchedIndex === -1) return sorted[sorted.length - 1].color
+    if (matchedIndex === -1) return sorted.at(-1).color
     // 低于第一个端点，使用第一个端点的颜色
     if (matchedIndex === 0) return sorted[0].color
 
@@ -888,6 +892,7 @@ function recomputeWeatherWarnFromLast() {
 }
 
 function applyNewConfig(arg) {
+    console.log('[DEBUG] applyNewConfig called, classContainer:', !!classContainer, 'root:', !!root)
     if (arg && !('debug_input_value' in arg)) {
         arg.debug_input_value = scheduleConfig.debug_input_value
     }
@@ -896,7 +901,9 @@ function applyNewConfig(arg) {
         root.style.setProperty(key, scheduleConfig.css_style[key])
     }
     scheduleData = getScheduleData();
+    console.log('[DEBUG] after getScheduleData, highlight:', scheduleData.currentHighlight)
     setScheduleClass()
+    console.log('[DEBUG] after setScheduleClass, highlighted element:', !!document.getElementById('highlighted'))
     setSidebar()
     if (scheduleConfig.weather_alert_override) {
         recomputeWeatherWarnFromLast();
@@ -905,7 +912,9 @@ function applyNewConfig(arg) {
 }
 
 ipcRenderer.on('newConfig', (e, arg) => {
+    console.log('[DEBUG] newConfig received, rendererReady:', rendererReady)
     if (!rendererReady) {
+        console.log('[DEBUG] newConfig cached as pendingConfig')
         pendingConfig = arg;
         return;
     }

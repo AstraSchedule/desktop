@@ -147,7 +147,7 @@
 .countdownContainer {
     position: absolute;
     left: 50%;
-    transition: all 2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: left 2s cubic-bezier(0.4, 0, 0.2, 1), top 2s cubic-bezier(0.4, 0, 0.2, 1), transform 2s cubic-bezier(0.4, 0, 0.2, 1);
     margin-top: calc(var(--banner-height) + 4px);
 }
 
@@ -169,14 +169,12 @@
     border-radius: var(--global-border-radius);
     padding: var(--countdown-bg-padding);
     font-size: var(--countdown-font-size);
-    transition: all 2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .currentClass {
     color: rgba(0, 255, 10, 1);
     display: inline;
     font-family: Sou, serif;
-    transition: all 2s cubic-bezier(0.4, 0, 0.2, 1);
     font-weight: bold;
 }
 
