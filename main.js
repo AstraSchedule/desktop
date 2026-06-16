@@ -1397,7 +1397,7 @@ ipcMain.on('fromCloud', (e, arg) => {
     prompt({
         title: '云端服务',
         label: '请设置云端服务：',
-        value: String(arg ?? store.get('server', 'class.khbit.cn')),
+        value: store.get('server', 'class.khbit.cn'),
         inputAttrs: {
             type: 'string'
         },
@@ -1421,7 +1421,7 @@ ipcMain.on('setClass', (e, arg) => {
     prompt({
         title: '所在班级',
         label: '请输入班级标识(例如 39/2023/1)：',
-        value: String(arg ?? store.get('class', '39/2023/1')),
+        value: store.get('class', '39/2023/1'),
         inputAttrs: {type: 'string'},
         type: 'input',
         height: 180,
