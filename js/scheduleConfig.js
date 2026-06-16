@@ -12,6 +12,9 @@ const _scheduleConfig = {
     weather_alert_override: false,
     weather_alert_brief: false,
 
+    // 启动行为：exit-退出, stay-滞留(不显示UI), normal-正常显示
+    startup_behavior: 'normal',
+
     // 顶部横幅：顶部横幅内容，为空则不显示横幅
     banner_text: '',
 

@@ -82,7 +82,8 @@ function getServer() {
     return String(store.get('server', 'class.khbit.cn'))
 }
 let classId = String(store.get("class", "39/2023/1"))
-console.log('Class:', classId, 'Server:', getServer(), 'Secure:', store.get("isSecureConnection", true));
+let isFromCloud = store.get('isFromCloud', false)
+console.log('Class:', classId, 'Server:', getServer(), 'Secure:', store.get("isSecureConnection", true), 'Cloud:', isFromCloud);
 
 const countdownCtx = {
     BrowserWindow,
@@ -421,6 +422,7 @@ const createWindow = () => {
         height: 200,
         frame: false,
         transparent: true,
+        show: false,
         alwaysOnTop: store.get('isWindowAlwaysOnTop', true),
         minimizable: false,
         maximizable: false,
@@ -439,6 +441,16 @@ const createWindow = () => {
     if (store.get('isWindowAlwaysOnTop', true))
         win.setAlwaysOnTop(true, 'screen-saver', 9999999999999)
 }
+
+let hasShownWindow = false
+function showMainWindow() {
+    if (hasShownWindow || !win || win.isDestroyed()) return
+    hasShownWindow = true
+    win.show()
+    if (store.get('isWindowAlwaysOnTop', true))
+        win.setAlwaysOnTop(true, 'screen-saver', 9999999999999)
+}
+
 function setAutoLaunch() {
     const shortcutName = '星程(请勿重命名).lnk'
     app.setLoginItemSettings({ // backward compatible
@@ -643,6 +655,20 @@ function getScheduleFromCloud() {
                     }
                 }
 
+                // 首次成功获取配置时，根据 startup_behavior 决定窗口行为
+                if (!hasShownWindow && isFromCloud) {
+                    const startupBehavior = scheduleConfigSync.startup_behavior || 'normal'
+                    console.log(`[Startup] startup_behavior=${startupBehavior}`)
+                    if (startupBehavior === 'exit') {
+                        console.log('[Startup] startup_behavior is exit, quitting app...')
+                        app.quit()
+                        return
+                    } else if (startupBehavior === 'normal') {
+                        showMainWindow()
+                    }
+                    // startupBehavior === 'stay' 时保持隐藏
+                }
+
                 // 检查是否含有 supportWebSocket 键
                 const supportWebSocket = scheduleConfigSync["supportWebSocket"] !== undefined ?
                     Boolean(scheduleConfigSync["supportWebSocket"]) : true;
@@ -700,7 +726,11 @@ app.whenReady().then(() => {
     Menu.setApplicationMenu(null)
     registerCountdownIpc(countdownCtx)
     setupAutoUpdater()
-    // 先进行网络连接检查，然后获取课表数据
+
+    if (!isFromCloud) {
+        showMainWindow()
+    }
+
     getScheduleFromCloudWithRetry().then(() => {});
     refreshCountdownWindow('startup').catch(() => {
     })
@@ -750,6 +780,7 @@ ipcMain.on('getWeekIndex', (e, arg) => {
             checked: store.get('isFromCloud', false),
             click: (e) => {
                 store.set('isFromCloud', e.checked)
+                isFromCloud = e.checked
             }
         },
         {
