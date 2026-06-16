@@ -58,6 +58,8 @@ let lastWeatherPayload = null
 // 默认横幅高度（用于从 0 恢复）
 let defaultBannerHeight = null
 let root = null;
+let rendererReady = false;
+let pendingConfig = null;
 let isClassCountdown = true
 let isClassHidden = true
 let isAlwaysMinimized = false // 始终缩小状态
@@ -615,6 +617,12 @@ async function initDomAndStart() {
     if (wsConnected !== undefined) {
         updateUIColorsForConnectionStatus(wsConnected);
     }
+
+    rendererReady = true;
+    if (pendingConfig) {
+        applyNewConfig(pendingConfig);
+        pendingConfig = null;
+    }
 }
 
 globalThis.addEventListener('DOMContentLoaded', () => {
@@ -879,9 +887,7 @@ function recomputeWeatherWarnFromLast() {
     return true;
 }
 
-ipcRenderer.on('newConfig', (e, arg) => {
-    // 云端下发的配置仅在当前会话生效，不写入本地用户配置
-    // 保留本地调试输入值，避免被云端配置覆盖
+function applyNewConfig(arg) {
     if (arg && !('debug_input_value' in arg)) {
         arg.debug_input_value = scheduleConfig.debug_input_value
     }
@@ -892,15 +898,18 @@ ipcRenderer.on('newConfig', (e, arg) => {
     scheduleData = getScheduleData();
     setScheduleClass()
     setSidebar()
-    // 配置变化也需应用覆盖规则
-    // 若开启预警覆盖并切换了简略/详细模式，立即基于最近一次天气数据重算，避免等待下一次天气刷新
     if (scheduleConfig.weather_alert_override) {
-        const ok = recomputeWeatherWarnFromLast();
-        if (!ok) {
-            // 无天气缓存时保持静默，不在配置变化时主动触发天气请求
-        }
+        recomputeWeatherWarnFromLast();
     }
     setBanner();
+}
+
+ipcRenderer.on('newConfig', (e, arg) => {
+    if (!rendererReady) {
+        pendingConfig = arg;
+        return;
+    }
+    applyNewConfig(arg);
 })
 
 ipcRenderer.on('ClassCountdown', (e, arg) => {
