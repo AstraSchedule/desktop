@@ -618,8 +618,23 @@ async function initDomAndStart() {
 }
 
 globalThis.addEventListener('DOMContentLoaded', () => {
-    initDomAndStart().catch(() => {
+    initDomAndStart().then(() => {
+        if (pendingShow && root) {
+            root.style.display = 'block'
+            pendingShow = false
+        }
+    }).catch(() => {
     })
+})
+
+let pendingShow = false
+ipcRenderer.on('showMainWindow', () => {
+    console.log('[Show] display change')
+    if (root) {
+        root.style.display = 'block'
+    } else {
+        pendingShow = true
+    }
 })
 
 function setScheduleDialog() {
@@ -704,10 +719,10 @@ ipcRenderer.on('getScheduleForDebugCalibration', () => {
         ipcRenderer.send('debugCalibrationData', { classes: [], timetable: {}, subjectNames: {} });
         return;
     }
-    
+
     const timetableKey = dailyClass.timetable;
     const timetable = scheduleConfig.timetable?.[timetableKey] || {};
-    
+
     // 获取当前周的课程列表
     const weekNumber = weekIndex;
     const classes = dailyClass.classList?.map(subject => {
@@ -716,7 +731,7 @@ ipcRenderer.on('getScheduleForDebugCalibration', () => {
         }
         return subject;
     }) || [];
-    
+
     ipcRenderer.send('debugCalibrationData', {
         classes,
         timetable,

@@ -35,6 +35,7 @@
 }
 
 :root {
+    display: none;
     transition: opacity .5s .2s;
 }
 

@@ -423,6 +423,7 @@ const createWindow = () => {
         height: 200,
         frame: false,
         transparent: true,
+        backgroundColor: '#00000000',
         alwaysOnTop: store.get('isWindowAlwaysOnTop', true),
         minimizable: false,
         maximizable: false,
@@ -441,6 +442,15 @@ const createWindow = () => {
     if (store.get('isWindowAlwaysOnTop', true))
         win.setAlwaysOnTop(true, 'screen-saver', 9999999999999)
 }
+
+let hasShownWindow = false
+function showMainWindow() {
+    console.log('[Startup] showMainWindow called, hasShownWindow:', hasShownWindow)
+    if (hasShownWindow || !win || win.isDestroyed()) return
+    hasShownWindow = true
+    win.webContents.send('showMainWindow')
+}
+
 function setAutoLaunch() {
     const shortcutName = '星程(请勿重命名).lnk'
     app.setLoginItemSettings({ // backward compatible
@@ -684,6 +694,8 @@ function getScheduleFromCloud() {
                         console.log('[Startup] startup_behavior is exit, quitting app...')
                         app.quit()
                         return
+                    } else if (startupBehavior === 'normal') {
+                        showMainWindow()
                     } else if (startupBehavior === 'stay') {
                         if (win && !win.isDestroyed()) win.hide()
                     }
@@ -952,6 +964,14 @@ ipcMain.on('getWeekIndex', (e, arg) => {
                     click: () => {
                         // 从渲染进程获取当前课表数据
                         win.webContents.send('getScheduleForDebugCalibration');
+                    }
+                },
+                {
+                    label: '开发调试',
+                    click: () => {
+                        if (win && !win.isDestroyed()) {
+                            win.webContents.openDevTools({ mode: 'detach' });
+                        }
                     }
                 },
             ]
