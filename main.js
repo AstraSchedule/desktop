@@ -120,6 +120,10 @@ async function refreshCountdownWindow(reason = 'manual') {
         // 首次成功后保持当前显示状态，不再触发刷新/隐藏逻辑
         return;
     }
+    if (countdownState.startupBehavior === 'stay') {
+        hideCountdownWindow(countdownState);
+        return;
+    }
     if (countdownState.loading) return;
     countdownState.loading = true;
     try {
@@ -689,6 +693,7 @@ function getScheduleFromCloud() {
                 // 根据 startup_behavior 决定窗口行为
                 if (isFromCloud) {
                     const startupBehavior = scheduleConfigSync.startup_behavior || 'normal'
+                    countdownState.startupBehavior = startupBehavior
                     console.log(`[Startup] startup_behavior=${startupBehavior}`)
                     if (startupBehavior === 'exit') {
                         console.log('[Startup] startup_behavior is exit, quitting app...')
