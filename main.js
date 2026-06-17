@@ -82,7 +82,8 @@ function getServer() {
     return String(store.get('server', 'class.khbit.cn'))
 }
 let classId = String(store.get("class", "39/2023/1"))
-console.log('Class:', classId, 'Server:', getServer(), 'Secure:', store.get("isSecureConnection", true));
+let isFromCloud = store.get('isFromCloud', false)
+console.log('Class:', classId, 'Server:', getServer(), 'Secure:', store.get("isSecureConnection", true), 'Cloud:', isFromCloud);
 
 const countdownCtx = {
     BrowserWindow,
@@ -672,6 +673,20 @@ function getScheduleFromCloud() {
                     : [];
 
                 if (win && !win.isDestroyed()) win.webContents.send('newConfig', scheduleConfigSync)
+
+                // 根据 startup_behavior 决定窗口行为
+                if (isFromCloud) {
+                    const startupBehavior = scheduleConfigSync.startup_behavior || 'normal'
+                    console.log(`[Startup] startup_behavior=${startupBehavior}`)
+                    if (startupBehavior === 'exit') {
+                        console.log('[Startup] startup_behavior is exit, quitting app...')
+                        app.quit()
+                        return
+                    } else if (startupBehavior === 'stay') {
+                        if (win && !win.isDestroyed()) win.hide()
+                    }
+                }
+
                 refreshCountdownWindow('schedule-sync').catch(() => {
                 })
             } catch (err) {
@@ -750,6 +765,7 @@ ipcMain.on('getWeekIndex', (e, arg) => {
             checked: store.get('isFromCloud', false),
             click: (e) => {
                 store.set('isFromCloud', e.checked)
+                isFromCloud = e.checked
             }
         },
         {
