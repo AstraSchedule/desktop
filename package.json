@@ -56,7 +56,7 @@
       "perMachine": false,
       "allowElevation": true,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
+      "createDesktopShortcut": false,
       "createStartMenuShortcut": true,
       "shortcutName": "星程课表",
       "deleteAppDataOnUninstall": false,
