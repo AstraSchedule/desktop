@@ -56,10 +56,10 @@
       "perMachine": false,
       "allowElevation": true,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": false,
+      "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "星程课表",
-      "deleteAppDataOnUninstall": false,
+      "deleteAppDataOnUninstall": true,
       "include": "build/installer.nsh",
       "packElevateHelper": false,
       "artifactName": "AstraSchedule-Setup-${version}.${ext}"
