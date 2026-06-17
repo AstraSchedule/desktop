@@ -83,6 +83,7 @@ function getServer() {
 }
 let classId = String(store.get("class", "39/2023/1"))
 let isFromCloud = store.get('isFromCloud', false)
+let lastScheduleConfig = null
 console.log('Class:', classId, 'Server:', getServer(), 'Secure:', store.get("isSecureConnection", true), 'Cloud:', isFromCloud);
 
 const countdownCtx = {
@@ -673,6 +674,7 @@ function getScheduleFromCloud() {
                     : [];
 
                 if (win && !win.isDestroyed()) win.webContents.send('newConfig', scheduleConfigSync)
+                lastScheduleConfig = scheduleConfigSync
 
                 // 根据 startup_behavior 决定窗口行为
                 if (isFromCloud) {
@@ -721,7 +723,9 @@ app.whenReady().then(() => {
     })
     win.webContents.on('did-finish-load', () => {
         win.webContents.send('getWeekIndex');
-
+        if (lastScheduleConfig) {
+            win.webContents.send('newConfig', lastScheduleConfig)
+        }
     })
     // powerMonitor 事件无 preventDefault
     electron.powerMonitor.on('suspend', () => {
