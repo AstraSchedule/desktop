@@ -45,32 +45,44 @@ function scopeMatch(scope, classId) {
     return false;
 }
 
+// 检查记录是否匹配当前班级
+function isRecordMatchingClass(rec, classId) {
+    const scopes = Array.isArray(rec.scope) ? rec.scope : [];
+    return scopes.length === 0 || scopes.some((s) => scopeMatch(s, classId))
+}
+
+// 解析单个日程项
+function parseScheduleItem(it) {
+    const name = String(it?.name || '').trim();
+    const date = String(it?.date || '').trim();
+    const priority = Number(it?.priority || 0);
+    if (!name || !date) return null;
+    const localDate = parseYmdLocal(date);
+    if (!localDate) return null;
+    const daysLeft = dayDiffLocalToday(localDate);
+    if (daysLeft < 0) return null;
+    return {name, date, priority, daysLeft}
+}
+
+// 排序日程（优先级高的在前，天数少的在前）
+function sortSchedules(schedules) {
+    return schedules.sort((a, b) => {
+        if (b.priority !== a.priority) return b.priority - a.priority;
+        return a.daysLeft - b.daysLeft;
+    })
+}
+
 function collectEffectiveSchedules(records, classId) {
     const out = [];
     for (const rec of Array.isArray(records) ? records : []) {
-        const scopes = Array.isArray(rec.scope) ? rec.scope : [];
-        if (scopes.length > 0 && !scopes.some((s) => scopeMatch(s, classId))) {
-            continue;
-        }
+        if (!isRecordMatchingClass(rec, classId)) continue;
         const schedules = Array.isArray(rec.schedules) ? rec.schedules : [];
         for (const it of schedules) {
-            const name = String(it?.name || '').trim();
-            const date = String(it?.date || '').trim();
-            const priority = Number(it?.priority || 0);
-            if (!name || !date) continue;
-            const localDate = parseYmdLocal(date);
-            if (!localDate) continue;
-            const daysLeft = dayDiffLocalToday(localDate);
-            // 过期日程自动隐藏（仅展示今天及未来）
-            if (daysLeft < 0) continue;
-            out.push({name, date, priority, daysLeft});
+            const parsed = parseScheduleItem(it);
+            if (parsed) out.push(parsed);
         }
     }
-    out.sort((a, b) => {
-        if (b.priority !== a.priority) return b.priority - a.priority;
-        return a.daysLeft - b.daysLeft;
-    });
-    return out;
+    return sortSchedules(out);
 }
 
 function requestJsonByNet(net, url) {
@@ -134,7 +146,7 @@ async function fetchCountdownData(ctx) {
     if (payload?.loading === true) return {loading: true, items: []};
 
     const hasConfig = payload?.hasConfig !== undefined ? !!payload.hasConfig : true;
-    if (!hasConfig) return {loading: false, items: []};
+    if (hasConfig === false) return {loading: false, items: []};
 
     const records = Array.isArray(payload?.data) ? payload.data : [];
     const items = collectEffectiveSchedules(records, classId).map((it) => ({

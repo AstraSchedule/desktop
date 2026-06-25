@@ -38,7 +38,7 @@ function stripJsonComments(str) {
         // 去掉块注释
         str = str.replaceAll(/\/\*[\s\S]*?\*\//g, '');
         // 去掉行注释（忽略字符串内 // 的复杂情况，这里假设用户配置较为简单）
-        str = str.replaceAll(/^\s*\/\/.*$/gm, '');
+        str = str.replaceAll(/^\s*\/\/[^\n]*$/gm, '');
         return str;
     } catch {
         return str
@@ -642,6 +642,43 @@ function getScheduleFromCloud() {
             return;
         }
 
+// 处理 WebSocket 配置
+function handleWebSocketConfig(config) {
+    const supportWebSocket = config["supportWebSocket"] === undefined
+        ? true : Boolean(config["supportWebSocket"]);
+
+    console.log(`[WebSocket] supportWebSocket=${supportWebSocket}, hasInitialized=${hasInitializedWebSocket}`);
+    websocketDisabled = !supportWebSocket;
+
+    if (!supportWebSocket) {
+        console.log('[WebSocket] Server does not support WebSocket, disconnecting...');
+        disconnectWebSocket();
+        updateTrayTooltip(false, true);
+    } else if (!hasInitializedWebSocket || !ws || ws.readyState !== WebSocket.OPEN) {
+        console.log('[WebSocket] Server supports WebSocket, connecting...');
+        if (!hasInitializedWebSocket) {
+            hasInitializedWebSocket = true;
+        }
+        connect();
+    }
+}
+
+// 处理启动行为
+function handleStartupBehavior(behavior) {
+    const startupBehavior = behavior || 'normal'
+    countdownState.startupBehavior = startupBehavior
+    console.log(`[Startup] startup_behavior=${startupBehavior}`)
+
+    if (startupBehavior === 'exit') {
+        console.log('[Startup] startup_behavior is exit, quitting app...')
+        app.quit()
+    } else if (startupBehavior === 'normal') {
+        showMainWindow()
+    } else if (startupBehavior === 'stay') {
+        if (win && !win.isDestroyed()) win.hide()
+    }
+}
+
         response.on('data', (chunk) => {
             raw += chunk.toString()
         })
@@ -650,7 +687,7 @@ function getScheduleFromCloud() {
                 const scheduleConfigSync = JSON.parse(raw)
                 console.log('Received schedule config from cloud:', scheduleConfigSync)
 
-                // 检查返回的 JSON 中是否含有 version 键
+                // 更新版本号
                 if (scheduleConfigSync.version !== undefined) {
                     const newVersion = Number.parseInt(scheduleConfigSync.version);
                     if (!Number.isNaN(newVersion) && newVersion > currentVersion) {
@@ -659,30 +696,10 @@ function getScheduleFromCloud() {
                     }
                 }
 
-                // 检查是否含有 supportWebSocket 键
-                const supportWebSocket = scheduleConfigSync["supportWebSocket"] !== undefined ?
-                    Boolean(scheduleConfigSync["supportWebSocket"]) : true;
+                // 处理 WebSocket 连接
+                handleWebSocketConfig(scheduleConfigSync)
 
-                console.log(`[WebSocket] supportWebSocket=${supportWebSocket}, hasInitialized=${hasInitializedWebSocket}`);
-
-                // 根据 supportWebSocket 值决定是否连接 WebSocket
-                websocketDisabled = !supportWebSocket; // 更新全局状态
-
-                if (!supportWebSocket) {
-                    // 如果不支持 WebSocket，则断开现有连接并停止重连机制
-                    console.log('[WebSocket] Server does not support WebSocket, disconnecting...');
-                    disconnectWebSocket();
-                    // 无论如何都要更新 Tooltip 状态，确保 Serverless 提示正确显示
-                    updateTrayTooltip(false, true);
-                } else if (!hasInitializedWebSocket || !ws || ws.readyState !== WebSocket.OPEN) {
-                    console.log('[WebSocket] Server supports WebSocket, connecting...');
-                    if (!hasInitializedWebSocket) {
-                        hasInitializedWebSocket = true;
-                    }
-                    connect();
-                }
-
-                // 缓存倒数日数据，供 countdown 窗口使用
+                // 缓存倒数日数据
                 countdownState.scheduleCountdownRecords = Array.isArray(scheduleConfigSync.countdown_records)
                     ? scheduleConfigSync.countdown_records
                     : [];
@@ -690,27 +707,14 @@ function getScheduleFromCloud() {
                 if (win && !win.isDestroyed()) win.webContents.send('newConfig', scheduleConfigSync)
                 lastScheduleConfig = scheduleConfigSync
 
-                // 根据 startup_behavior 决定窗口行为
+                // 处理启动行为
                 if (isFromCloud) {
-                    const startupBehavior = scheduleConfigSync.startup_behavior || 'normal'
-                    countdownState.startupBehavior = startupBehavior
-                    console.log(`[Startup] startup_behavior=${startupBehavior}`)
-                    if (startupBehavior === 'exit') {
-                        console.log('[Startup] startup_behavior is exit, quitting app...')
-                        app.quit()
-                        return
-                    } else if (startupBehavior === 'normal') {
-                        showMainWindow()
-                    } else if (startupBehavior === 'stay') {
-                        if (win && !win.isDestroyed()) win.hide()
-                    }
+                    handleStartupBehavior(scheduleConfigSync.startup_behavior)
                 }
 
-                refreshCountdownWindow('schedule-sync').catch(() => {
-                })
+                refreshCountdownWindow('schedule-sync').catch(() => {})
             } catch (err) {
                 console.error('getScheduleFromCloud JSON parse error:', err)
-                // 不显示错误弹窗，仅记录错误
             }
             console.log('No more data in response.')
         })

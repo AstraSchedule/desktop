@@ -1,5 +1,11 @@
 const { ipcRenderer } = require('electron');
 
+let scheduleConfig;
+let weekIndex;
+let timeOffset;
+let dayOffset;
+let setDayOffsetLastDay;
+
 // 新增：深合并与用户配置加载/保存
 function isPlainObject(x) {
     return x && typeof x === 'object' && !Array.isArray(x);
@@ -303,51 +309,60 @@ function formatFullName(fullName) {
     return fullName.replaceAll(/@(.+)/g, '<sub>$1</sub>');
 }
 
+// 获取当前课程颜色
+function getCurrentClassColor() {
+    return wsConnected ? 'rgba(0, 255, 10, 1)' : 'rgba(255, 165, 0, 1)'
+}
+
+// 设置迷你倒计时窗口内容
+function setMiniCountdownContent(color) {
+    const nextClass = scheduleData.nextScheduleName || '明天'
+    miniCountdown.innerHTML = `<div class="currentClass" style="color: ${color}">${formatFullName(scheduleData.currentHighlight.fullName)}</div><div class="countdown" style="margin-left:5px">${scheduleData.currentHighlight.countdownText}</div> | 下一节：<span class="class upcoming" id="highlighted">${formatFullName(nextClass)}</span>`
+}
+
+// 设置显示模式：隐藏主体，显示迷你窗口
+function setDisplayMiniMode(globalContainer) {
+    countdownContainer.style.display = 'none'
+    miniCountdown.style.display = 'block'
+    if (globalContainer) globalContainer.style.display = 'none'
+}
+
+// 设置显示模式：显示主体，隐藏迷你窗口
+function setDisplayFullMode(globalContainer) {
+    countdownContainer.style.display = 'block'
+    miniCountdown.style.display = 'none'
+    if (globalContainer) globalContainer.style.display = 'block'
+}
+
+// 设置显示模式：都不显示
+function setDisplayHiddenMode(globalContainer) {
+    countdownContainer.style.display = 'none'
+    miniCountdown.style.display = 'none'
+    if (globalContainer) globalContainer.style.display = 'none'
+}
+
 function setCountdownerContent() {
     currentFullName.innerHTML = formatFullName(scheduleData.currentHighlight.fullName);
-    // 根据连接状态和课程类型设置颜色
-    if (scheduleData.currentHighlight.type === 'current') {
-        // 当前课程：如果连接正常为绿色，连接异常时为橙色
-        currentFullName.style.color = wsConnected ? 'rgba(0, 255, 10, 1)' : 'rgba(255, 165, 0, 1)';
-    } else {
-        // 非当前课程保持黄色
-        currentFullName.style.color = 'rgba(255, 255, 5, 1)';
-    }
+    currentFullName.style.color = scheduleData.currentHighlight.type === 'current'
+        ? getCurrentClassColor()
+        : 'rgba(255, 255, 5, 1)';
     countdownText.innerText = scheduleData.currentHighlight.countdownText;
 
     const globalContainer = document.getElementById('globalContainer');
+    const isCurrent = scheduleData.currentHighlight.type === 'current'
 
-    if (scheduleData.currentHighlight.type === 'current') {
-        if (isClassCountdown) {
-            if (isClassHidden) { // 上课 并且开启了倒计时 并且 隐藏主体 -> 显示小窗口
-                countdownContainer.style.display = 'none'
-                miniCountdown.style.display = 'block'
-                if (globalContainer) globalContainer.style.display = 'none'
-                // 仅渲染文本，避免对 currentFullName.innerText 的副作用
-                // 根据网络连接状态设置currentClass的颜色
-                const currentClassColor = wsConnected ? 'rgba(0, 255, 10, 1)' : 'rgba(255, 165, 0, 1)';
-                miniCountdown.innerHTML = `<div class="currentClass" style="color: ${currentClassColor}">${formatFullName(scheduleData.currentHighlight.fullName)}</div><div class="countdown" style="margin-left:5px">${scheduleData.currentHighlight.countdownText}</div>`
-            } else { // 上课 并且开启了倒计时 并且 不隐藏主体 -> 正常计时
-                countdownContainer.style.display = 'block'
-                miniCountdown.style.display = 'none'
-                if (globalContainer) globalContainer.style.display = 'block'
-            }
-        } else { // 上课 并且关闭了倒计时 -> 都不显示
-            countdownContainer.style.display = 'none'
-            miniCountdown.style.display = 'none'
-            if (globalContainer) globalContainer.style.display = 'none'
-        }
+    if (isCurrent && isClassCountdown && isClassHidden) {
+        setDisplayMiniMode(globalContainer)
+        setMiniCountdownContent(getCurrentClassColor())
+    } else if (isCurrent && isClassCountdown) {
+        setDisplayFullMode(globalContainer)
+    } else if (isCurrent) {
+        setDisplayHiddenMode(globalContainer)
     } else if (isAlwaysMinimized) {
-        countdownContainer.style.display = 'none'
-        miniCountdown.style.display = 'block'
-        if (globalContainer) globalContainer.style.display = 'none'
-        const currentClassColor = wsConnected ? 'rgba(255, 255, 5, 1)' : 'rgba(255, 165, 0, 1)';
-        const nextClass = scheduleData.nextScheduleName || '明天';  // “明天” 意味着今天的课程已经结束
-        miniCountdown.innerHTML = `<div class="currentClass" style="color: ${currentClassColor}">${formatFullName(scheduleData.currentHighlight.fullName)}</div><div class="countdown" style="margin-left:5px">${scheduleData.currentHighlight.countdownText}</div> | 下一节：<span class="class upcoming" id="highlighted">${formatFullName(nextClass)}</span>`
+        setDisplayMiniMode(globalContainer)
+        setMiniCountdownContent('rgba(255, 255, 5, 1)')
     } else {
-        countdownContainer.style.display = 'block';
-        miniCountdown.style.display = 'none'
-        if (globalContainer) globalContainer.style.display = 'block'
+        setDisplayFullMode(globalContainer)
     }
 }
 
@@ -402,7 +417,8 @@ function setCountdownerPosition() {
     countdownContainer.style.top = offset.y + 'px';
     countdownContainer.style.transform = 'none';
 
-    void countdownContainer.offsetHeight;
+    // 触发 reflow 以重置过渡效果
+    countdownContainer.offsetHeight;
 
     // 恢复过渡效果
     countdownContainer.style.transition = originalTransition;
@@ -763,63 +779,48 @@ ipcRenderer.on('setCloudSec', (e, arg) => {
     console.log('[Renderer] setCloudSec =', isSecureConnection)
 })
 
+// 温度颜色配置：离散模式下根据温度返回颜色
+function getDiscreteColor(t, stops) {
+    for (const stop of stops) {
+        if (t < stop.temp) return stop.color
+    }
+    return stops.length > 0 ? stops.at(-1).color : null
+}
+
+// 温度颜色配置：根据配置获取温度对应颜色
+function getTemperatureColor(t, cfg) {
+    if (!cfg?.stops?.length) {
+        if (t < 24) return "#66CCFF"
+        if (t <= 26) return "#5FBC21"
+        return "#EE0000"
+    }
+    if (cfg.use_gradient && typeof interpolateGradientColor === 'function') {
+        return interpolateGradientColor(t, cfg.stops)
+    }
+    return getDiscreteColor(t, cfg.stops)
+}
+
 // 小函数：温度与天气状态更新
 function applyTemperature(arg){
-    if (!temperature || !weather) return; // DOM 未就绪时跳过，避免警告
+    if (!temperature || !weather) return;
     const rawTemp = Number(arg['temp'])
-    // 应用调试输入偏移值
     const offset = Number(scheduleConfig.debug_input_value || '0')
-    const t = isNaN(rawTemp) ? NaN : (rawTemp + offset)
-    temperature.innerText = (isNaN(t) ? '-' : t) + "℃"
-    if (!isNaN(t)) {
-        const cfg = scheduleConfig.temperature_colors
-        if (cfg && cfg.stops && cfg.stops.length > 0) {
-            if (cfg.use_gradient) {
-                // 渐变模式：在相邻端点间线性插值（函数在 Task 7 中实现）
-                if (typeof interpolateGradientColor === 'function') {
-                    temperature.style.color = interpolateGradientColor(t, cfg.stops)
-                } else {
-                    // 回退到离散模式
-                    for (const stop of cfg.stops) {
-                        if (t < stop.temp) {
-                            temperature.style.color = stop.color
-                            break
-                        }
-                    }
-                }
-            } else {
-                // 离散模式：遍历 stops，找首个 t < stop.temp 的端点，使用其颜色
-                let matched = false
-                for (const stop of cfg.stops) {
-                    if (t < stop.temp) {
-                        temperature.style.color = stop.color
-                        matched = true
-                        break
-                    }
-                }
-                // 如果所有 stops 都不满足（t >= 所有 stop.temp），使用最后一个 stop 的颜色
-                if (!matched && cfg.stops.length > 0) {
-                    temperature.style.color = cfg.stops[cfg.stops.length - 1].color
-                }
-            }
-        } else {
-            // 配置不存在时的回退行为（保持原硬编码逻辑）
-            if (t < 24) temperature.style.color = "#66CCFF"
-            else if (t <= 26) temperature.style.color = "#5FBC21"
-            else temperature.style.color = "#EE0000"
-        }
+    const t = Number.isNaN(rawTemp) ? NaN : (rawTemp + offset)
+    temperature.innerText = (Number.isNaN(t) ? '-' : t) + "℃"
+    if (!Number.isNaN(t)) {
+        temperature.style.color = getTemperatureColor(t, scheduleConfig.temperature_colors)
     }
     weather.innerText = String(arg['weat'] ?? '')
 }
 
 // 颜色插值辅助：在两个 hex 颜色间按比例线性插值（RGB 空间）
 function lerpColor(c1, c2, ratio) {
-    const r1 = parseInt(c1.slice(1, 3), 16)
-    const g1 = parseInt(c1.slice(3, 5), 16)
-    const b1 = parseInt(c1.slice(5, 7), 16)
-    const r2 = parseInt(c2.slice(1, 3), 16)
-    const g2 = parseInt(c2.slice(3, 5), 16)
-    const b2 = parseInt(c2.slice(5, 7), 16)
+    const r1 = Number.parseInt(c1.slice(1, 3), 16)
+    const g1 = Number.parseInt(c1.slice(3, 5), 16)
+    const b1 = Number.parseInt(c1.slice(5, 7), 16)
+    const r2 = Number.parseInt(c2.slice(1, 3), 16)
+    const g2 = Number.parseInt(c2.slice(3, 5), 16)
+    const b2 = Number.parseInt(c2.slice(5, 7), 16)
     const r = Math.round(r1 + (r2 - r1) * ratio)
     const g = Math.round(g1 + (g2 - g1) * ratio)
     const b = Math.round(b1 + (b2 - b1) * ratio)
@@ -842,7 +843,7 @@ function interpolateGradientColor(t, stops) {
     }
 
     // 超出所有端点范围，使用最后一个端点的颜色
-    if (matchedIndex === -1) return sorted[sorted.length - 1].color
+    if (matchedIndex === -1) return sorted.at(-1).color
     // 低于第一个端点，使用第一个端点的颜色
     if (matchedIndex === 0) return sorted[0].color
 
@@ -950,9 +951,7 @@ ipcRenderer.on('getDayOffset', (e, arg) => {
     if (arg.index <= 6) {
         localStorage.setItem('dayOffset', arg.index.toString())
         localStorage.setItem('setDayOffsetLastDay', new Date().getDay().toString())
-        // noinspection JSUndeclaredVariable
         dayOffset = arg.index
-        // noinspection JSUndeclaredVariable
         setDayOffsetLastDay = new Date().getDay()
         return
     }

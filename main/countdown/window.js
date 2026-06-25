@@ -81,7 +81,7 @@ function showCountdownWindow(ctx) {
     const win = ensureCountdownWindow(ctx);
     applyModeBounds(win, screen, state.minimized, (state.latestItems || []).length || 1);
     if (!win.isVisible()) {
-        if (win.webContents && win.webContents.isLoading()) {
+        if (win.webContents?.isLoading()) {
             win.once('ready-to-show', () => {
                 if (!win.isDestroyed() && !win.isVisible()) {
                     win.showInactive();
