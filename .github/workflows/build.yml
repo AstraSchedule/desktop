@@ -25,7 +25,7 @@ jobs:
           python-version: '3.12'
 
       - name: Set up Bun
-        uses: oven-sh/setup-bun@0c5077e15f12c32e3f53a39c8f81c41c8c2e5e1a
+        uses: oven-sh/setup-bun@v2.2.0
         with:
           bun-version: 'latest'
 
