@@ -508,9 +508,27 @@ async function initDomAndStart() {
     // 初始化跑马灯能力（此顺序确保 start/stop 方法存在）
     initBannerMarquee();
 
-    // 首次应用配置样式（基于合并后的 scheduleConfig）
-    for (const key in scheduleConfig.css_style) {
-        root.style.setProperty(key, scheduleConfig.css_style[key])
+    // 首次应用配置样式：用默认值兜底，再覆盖服务端值
+    const defaultCss = {
+        '--center-font-size': '30px',
+        '--corner-font-size': '14px',
+        '--countdown-font-size': '28px',
+        '--global-border-radius': '16px',
+        '--global-bg-opacity': '0.3',
+        '--container-bg-padding': '8px 14px',
+        '--countdown-bg-padding': '5px 12px',
+        '--container-space': '16px',
+        '--top-space': '16px',
+        '--main-horizontal-space': '8px',
+        '--divider-width': '2px',
+        '--divider-margin': '6px',
+        '--triangle-size': '16px',
+        '--sub-font-size': '20px',
+        '--banner-height': '30px',
+    }
+    const mergedCss = { ...defaultCss, ...(scheduleConfig.css_style || {}) }
+    for (const key in mergedCss) {
+        root.style.setProperty(key, mergedCss[key])
     }
     // 记录默认 banner 高度（用于从 0 恢复）
     defaultBannerHeight = (scheduleConfig?.css_style?.['--banner-height'])
@@ -901,8 +919,26 @@ ipcRenderer.on('newConfig', (e, arg) => {
         arg.debug_input_value = scheduleConfig.debug_input_value
     }
     scheduleConfig = arg
-    for (const key in scheduleConfig.css_style) {
-        root.style.setProperty(key, scheduleConfig.css_style[key])
+    const defaultCss2 = {
+        '--center-font-size': '30px',
+        '--corner-font-size': '14px',
+        '--countdown-font-size': '28px',
+        '--global-border-radius': '16px',
+        '--global-bg-opacity': '0.3',
+        '--container-bg-padding': '8px 14px',
+        '--countdown-bg-padding': '5px 12px',
+        '--container-space': '16px',
+        '--top-space': '16px',
+        '--main-horizontal-space': '8px',
+        '--divider-width': '2px',
+        '--divider-margin': '6px',
+        '--triangle-size': '16px',
+        '--sub-font-size': '20px',
+        '--banner-height': '30px',
+    }
+    const mergedCss2 = { ...defaultCss2, ...(scheduleConfig.css_style || {}) }
+    for (const key in mergedCss2) {
+        root.style.setProperty(key, mergedCss2[key])
     }
     scheduleData = getScheduleData();
     setScheduleClass()
