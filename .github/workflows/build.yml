@@ -54,11 +54,15 @@ jobs:
 
       - name: Copy NSIS installer as AstraScheduleInstaller.exe
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $installer = Get-ChildItem -Path dist -Filter "*-Setup-*.exe" | Select-Object -First 1
           if ($installer) {
             Copy-Item $installer.FullName -Destination "dist/AstraScheduleInstaller.exe"
             Write-Host "Copied $($installer.Name) -> dist/AstraScheduleInstaller.exe"
+            $ver = (Get-Content package.json | ConvertFrom-Json).version
+            gh release upload "v$ver" dist/AstraScheduleInstaller.exe --clobber
           } else {
             Write-Host "No NSIS installer found"
           }
