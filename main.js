@@ -82,16 +82,22 @@ function getServer() {
     return String(store.get('server', 'class.getastra.cn'))
 }
 
-// 统一 HTTP 请求，自动注入 User-Agent
+// 统一 HTTP 请求，注入 User-Agent，不请求客户端证书（mTLS）
 function astraRequest(options) {
-    const { net } = require('electron')
+    const https = require('https')
     const ua = `AstraSchedule/${app.getVersion()}`
-    if (typeof options === 'string') {
-        return net.request({ url: options, headers: { 'User-Agent': ua } })
-    }
-    return net.request({
-        ...options,
-        headers: { 'User-Agent': ua, ...(options.headers || {}) },
+    const url = typeof options === 'string' ? options : options.url
+    const method = (typeof options === 'object' ? options.method : null) || 'GET'
+    const headers = { 'User-Agent': ua, ...(typeof options === 'object' ? (options.headers || {}) : {}) }
+    const parsed = new URL(url)
+    return https.request({
+        hostname: parsed.hostname,
+        port: parsed.port || 443,
+        path: parsed.pathname + parsed.search,
+        method,
+        headers,
+        requestCert: false,
+        rejectUnauthorized: true,
     })
 }
 let classId = String(store.get("class", "39/2023/1"))
