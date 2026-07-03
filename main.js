@@ -81,6 +81,19 @@ function getProtocols() {
 function getServer() {
     return String(store.get('server', 'class.getastra.cn'))
 }
+
+// 统一 HTTP 请求，自动注入 User-Agent
+function astraRequest(options) {
+    const { net } = require('electron')
+    const ua = `AstraSchedule/${app.getVersion()}`
+    if (typeof options === 'string') {
+        return net.request({ url: options, headers: { 'User-Agent': ua } })
+    }
+    return net.request({
+        ...options,
+        headers: { 'User-Agent': ua, ...(options.headers || {}) },
+    })
+}
 let classId = String(store.get("class", "39/2023/1"))
 let isFromCloud = store.get('isFromCloud', false)
 let lastScheduleConfig = null
@@ -537,12 +550,11 @@ let hasInitializedWebSocket = false;
 // 检查网络连接
 function checkNetworkConnection() {
     return new Promise((resolve) => {
-        const {net} = require('electron')
         const {agreement} = getProtocols()
         const server = getServer()
 
         // 尝试连接到服务器的根路径（轻量级检查）
-        const request = net.request({
+        const request = astraRequest({
             method: 'GET',
             url: `${agreement}://${server}/`
         })
@@ -611,14 +623,13 @@ async function getScheduleFromCloudWithRetry(maxRetries = 10) {
 }
 
 function getScheduleFromCloud() {
-    const { net } = require('electron')
     const { agreement } = getProtocols()
     // 添加 version 查询参数
     const url = `${agreement}://${getServer()}/${classId}?version=${currentVersion}`
     console.log('Requesting schedule from cloud:', url);
 
     // noinspection JSCheckFunctionSignatures
-    const request = net.request({
+    const request = astraRequest({
         method: 'GET',
         url: url
     })
@@ -1155,9 +1166,8 @@ function requestWeatherWithRetry() {
     if (weatherRequestInFlight) return
     weatherRequestInFlight = true
 
-    const { net } = require('electron')
     const { agreement } = getProtocols()
-    const request = net.request(
+    const request = astraRequest(
         `${agreement}://${getServer()}/api/weather/${store.get('local', "")}`
     )
     let raw = ''
@@ -1208,10 +1218,9 @@ ipcMain.on('RequestSyncConfig', () => {
         icon: asset('image', 'toggle.png'),
     }).then((r) => {
         if (r === null) return;
-        const { net } = require('electron')
         const { agreement } = getProtocols()
         // noinspection JSCheckFunctionSignatures
-        const request = net.request({
+        const request = astraRequest({
             method: 'POST',
             url: `${agreement}://${getServer()}/api/broadcast/${classId}`,
             headers: {
