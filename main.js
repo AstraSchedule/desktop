@@ -79,7 +79,7 @@ function getProtocols() {
     return { agreement: secure ? 'https' : 'http', agreementWs: secure ? 'wss' : 'ws' }
 }
 function getServer() {
-    return String(store.get('server', 'class.khbit.cn'))
+    return String(store.get('server', 'class.getastra.cn'))
 }
 let classId = String(store.get("class", "39/2023/1"))
 let isFromCloud = store.get('isFromCloud', false)
@@ -1410,7 +1410,7 @@ ipcMain.on('fromCloud', (e, arg) => {
     prompt({
         title: '云端服务',
         label: '请设置云端服务：',
-        value: String(arg ?? store.get('server', 'class.khbit.cn')),
+        value: String(arg ?? store.get('server', 'class.getastra.cn')),
         inputAttrs: {
             type: 'string'
         },

@@ -741,7 +741,7 @@ ipcRenderer.on('getScheduleForDebugCalibration', () => {
 
 ipcRenderer.on('fromCloud', () => {
     let uri = localStorage.getItem('server');
-    ipcRenderer.send('fromCloud', uri === null ? "class.khbit.cn" : uri.toString())
+    ipcRenderer.send('fromCloud', uri === null ? "class.getastra.cn" : uri.toString())
 })
 
 ipcRenderer.on('setClass', () => {
