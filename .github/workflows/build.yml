@@ -52,6 +52,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bun run ci
 
+      - name: Copy NSIS installer as AstraScheduleInstaller.exe
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path dist -Filter "*-Setup-*.exe" | Select-Object -First 1
+          if ($installer) {
+            Copy-Item $installer.FullName -Destination "dist/AstraScheduleInstaller.exe"
+            Write-Host "Copied $($installer.Name) -> dist/AstraScheduleInstaller.exe"
+          } else {
+            Write-Host "No NSIS installer found"
+          }
+
       - name: Upload dist as artifact
         uses: actions/upload-artifact@v4
         with:
