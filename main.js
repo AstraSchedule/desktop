@@ -729,56 +729,9 @@ function handleStartupBehavior(behavior) {
 }
 const { startAeroMonitoring, stopAeroMonitoring } = require('./main/aeroCheck');
 
-app.whenReady().then(() => {
-    if (startAeroMonitoring()) {
-        // Aero 检查失败，app.quit() 已调用，直接返回
-        return;
-    }
-    createWindow()
-    Menu.setApplicationMenu(null)
-    registerCountdownIpc(countdownCtx)
-    setupAutoUpdater()
-    // 先进行网络连接检查，然后获取课表数据
-    getScheduleFromCloudWithRetry().then(() => {});
-    refreshCountdownWindow('startup').catch(() => {
-    })
-    win.webContents.on('did-finish-load', () => {
-        win.webContents.send('getWeekIndex');
-        if (lastScheduleConfig) {
-            win.webContents.send('newConfig', lastScheduleConfig)
-        }
-    })
-    // powerMonitor 事件无 preventDefault
-    electron.powerMonitor.on('suspend', () => {
-        app.quit()
-    })
-    electron.powerMonitor.on('shutdown', () => {
-        app.quit()
-    })
-    setAutoLaunch()
-})
-
-app.on('before-quit', () => {
-    stopAeroMonitoring()
-    clearCountdownStartupRetryTimer()
-    if (countdownState.pollTimer) {
-        clearInterval(countdownState.pollTimer)
-        countdownState.pollTimer = null
-    }
-})
-
-
-
-// 仅提供读取用户配置的 IPC
-ipcMain.handle('readUserConfig', () => readUserConfigSafe())
-ipcMain.handle('getUserConfigPath', () => getUserConfigPath())
-
-ipcMain.on('getWeekIndex', (e, arg) => {
-    // 销毁旧的 Tray 实例，避免重复创建和状态丢失
+function initTray() {
     if (tray) {
-        try {
-            tray.destroy();
-        } catch (err) {
+        try { tray.destroy(); } catch (err) {
             console.error('Failed to destroy tray:', err);
         }
     }
@@ -829,7 +782,6 @@ ipcMain.on('getWeekIndex', (e, arg) => {
                     return
                 }
                 setupAutoUpdater()
-                // 按需加载再调用
                 const { autoUpdater } = require('electron-updater')
                 autoUpdater.checkForUpdates().catch((err) => {
                     console.error('[Updater] manual check failed', err)
@@ -909,7 +861,6 @@ ipcMain.on('getWeekIndex', (e, arg) => {
             icon: asset('image', 'toggle.png'),
             label: '更新课表',
             click: () => {
-                // Serverless 模式下直接拉取课表，无需广播
                 if (websocketDisabled) {
                     getScheduleFromCloud();
                     return;
@@ -971,7 +922,6 @@ ipcMain.on('getWeekIndex', (e, arg) => {
                 {
                     label: '调试矫正',
                     click: () => {
-                        // 从渲染进程获取当前课表数据
                         win.webContents.send('getScheduleForDebugCalibration');
                     }
                 },
@@ -1073,9 +1023,7 @@ ipcMain.on('getWeekIndex', (e, arg) => {
             }
         }
     ]
-    template[arg]?.checked !== undefined && (template[arg].checked = true)
     form = Menu.buildFromTemplate(template)
-    // 恢复之前的 ToolTip 状态
     updateTrayTooltip(currentConnectionState, websocketDisabled)
     function trayClicked() {
         tray.popUpContextMenu(form)
@@ -1086,6 +1034,55 @@ ipcMain.on('getWeekIndex', (e, arg) => {
     win.webContents.send('ClassCountdown', store.get('isDuringClassCountdown', true))
     win.webContents.send('ClassHidden', store.get('isDuringClassHidden', true))
     win.webContents.send('AlwaysMinimized', store.get('isAlwaysMinimized', false))
+}
+
+app.whenReady().then(() => {
+    if (startAeroMonitoring()) {
+        // Aero 检查失败，app.quit() 已调用，直接返回
+        return;
+    }
+    createWindow()
+    Menu.setApplicationMenu(null)
+    registerCountdownIpc(countdownCtx)
+    setupAutoUpdater()
+    // 先进行网络连接检查，然后获取课表数据
+    getScheduleFromCloudWithRetry().then(() => {});
+    refreshCountdownWindow('startup').catch(() => {
+    })
+    initTray()
+    win.webContents.on('did-finish-load', () => {
+        win.webContents.send('getWeekIndex');
+        if (lastScheduleConfig) {
+            win.webContents.send('newConfig', lastScheduleConfig)
+        }
+    })
+    // powerMonitor 事件无 preventDefault
+    electron.powerMonitor.on('suspend', () => {
+        app.quit()
+    })
+    electron.powerMonitor.on('shutdown', () => {
+        app.quit()
+    })
+    setAutoLaunch()
+})
+
+app.on('before-quit', () => {
+    stopAeroMonitoring()
+    clearCountdownStartupRetryTimer()
+    if (countdownState.pollTimer) {
+        clearInterval(countdownState.pollTimer)
+        countdownState.pollTimer = null
+    }
+})
+
+
+
+// 仅提供读取用户配置的 IPC
+ipcMain.handle('readUserConfig', () => readUserConfigSafe())
+ipcMain.handle('getUserConfigPath', () => getUserConfigPath())
+
+ipcMain.on('getWeekIndex', (e, arg) => {
+    // tray 已在 initTray() 中创建，此处不再重复创建
 })
 
 // 提供鼠标位置与窗口边界给渲染进程（用于穿透下的悬停检测）
