@@ -1,0 +1,12 @@
+{
+  "name": "reminder",
+  "version": "1.0.0",
+  "description": "提醒示例插件，演示 onScheduleReminder 钩子",
+  "author": "AstraSchedule",
+  "main": "main.js",
+  "hooks": ["onScheduleReminder"],
+  "reminders": [
+    { "type": "class", "offset": -60 },
+    { "type": "break", "offset": 30 }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "name": "hello-world",
+  "version": "1.0.0",
+  "description": "Hello World 示例插件，演示基本生命周期钩子",
+  "author": "AstraSchedule",
+  "main": "main.js",
+  "hooks": ["onInit", "onDestroy", "onTimeStateChange"]
+}
