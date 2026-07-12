@@ -635,7 +635,99 @@ async function initDomAndStart() {
     }
 }
 
+// 渲染进程插件管理器
+const RendererPluginManager = {
+    /** @type {Map<string, object>} name -> loaded renderer module */
+    plugins: new Map(),
+
+    /**
+     * 从主进程获取插件列表并加载渲染进程模块
+     */
+    async init() {
+        try {
+            const plugins = await ipcRenderer.invoke('getRendererPlugins');
+            if (!Array.isArray(plugins)) return;
+
+            for (const info of plugins) {
+                if (!info.rendererPath || !info.enabled) continue;
+                this.loadPlugin(info);
+            }
+            console.log(`[RendererPlugin] 已加载 ${this.plugins.size} 个渲染插件`);
+        } catch (err) {
+            console.error('[RendererPlugin] 初始化失败:', err.message);
+        }
+    },
+
+    /**
+     * 加载单个插件的渲染进程模块
+     * @param {object} info - 插件信息（含 rendererPath, name, hooks）
+     */
+    loadPlugin(info) {
+        try {
+            const mod = require(info.rendererPath);
+            this.plugins.set(info.name, { module: mod, hooks: info.hooks || [], name: info.name });
+            if (typeof mod.onInit === 'function') {
+                mod.onInit({ document, ipcRenderer, logger: console });
+            }
+            console.log(`[RendererPlugin] 已加载: ${info.name}`);
+        } catch (err) {
+            console.error(`[RendererPlugin] 加载 ${info.name} 失败:`, err.message);
+        }
+    },
+
+    /**
+     * 触发指定 hook
+     * @param {string} hookName
+     * @param {...any} args
+     */
+    triggerHook(hookName, ...args) {
+        for (const [name, entry] of this.plugins) {
+            if (!entry.hooks.includes(hookName)) continue;
+            const fn = entry.module[hookName];
+            if (typeof fn !== 'function') continue;
+            try {
+                fn.call(entry.module, ...args);
+            } catch (err) {
+                console.error(`[RendererPlugin] ${name}.${hookName} 执行出错:`, err.message);
+            }
+        }
+    },
+
+    /**
+     * 触发 onTimeStateChange hook
+     * @param {object} info
+     */
+    triggerTimeStateChange(info) {
+        this.triggerHook('onTimeStateChange', info);
+    },
+
+    /**
+     * 触发 onScheduleReminder hook
+     * @param {object} reminder
+     */
+    triggerScheduleReminder(reminder) {
+        this.triggerHook('onScheduleReminder', reminder);
+    },
+
+    /**
+     * 销毁所有插件
+     */
+    destroy() {
+        for (const [name, entry] of this.plugins) {
+            if (typeof entry.module.onDestroy === 'function') {
+                try {
+                    entry.module.onDestroy();
+                } catch (err) {
+                    console.error(`[RendererPlugin] ${name}.onDestroy 执行出错:`, err.message);
+                }
+            }
+        }
+        this.plugins.clear();
+    },
+};
+
 globalThis.addEventListener('DOMContentLoaded', () => {
+    RendererPluginManager.init();
     initDomAndStart().then(() => {
         if (pendingShow && root) {
             root.style.display = 'block'
