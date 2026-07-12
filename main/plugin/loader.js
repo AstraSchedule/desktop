@@ -129,6 +129,7 @@ function loadPlugin(pluginPath) {
         return null;
     }
 
+    // 同步 I/O：插件加载仅在启动时执行一次，无需异步
     let raw;
     try {
         raw = fs.readFileSync(jsonPath, 'utf-8');
@@ -173,9 +174,15 @@ function loadPlugin(pluginPath) {
 
     // 检查入口文件是否存在并加载主进程模块
     if (pluginInfo.main) {
-        const mainPath = path.join(pluginPath, pluginInfo.main);
+        const mainPath = path.resolve(pluginPath, pluginInfo.main);
+        // 路径遍历保护：确保解析后的路径仍在插件目录内
+        if (!mainPath.startsWith(path.resolve(pluginPath) + path.sep) && mainPath !== path.resolve(pluginPath)) {
+            console.error(`[Plugin] 主进程入口路径越界: ${pluginInfo.main} -> ${mainPath}`);
+            return null;
+        }
         if (fs.existsSync(mainPath)) {
             try {
+                // ponytail: require() 缓存意味着禁用/卸载插件后模块仍在内存中，已知限制
                 pluginInfo.mainModule = require(mainPath);
                 console.log(`[Plugin] 已加载主进程模块: ${pluginInfo.name}`);
             } catch (err) {
@@ -189,7 +196,12 @@ function loadPlugin(pluginPath) {
     }
 
     if (pluginInfo.renderer) {
-        const rendererPath = path.join(pluginPath, pluginInfo.renderer);
+        const rendererPath = path.resolve(pluginPath, pluginInfo.renderer);
+        // 路径遍历保护
+        if (!rendererPath.startsWith(path.resolve(pluginPath) + path.sep) && rendererPath !== path.resolve(pluginPath)) {
+            console.error(`[Plugin] 渲染进程入口路径越界: ${pluginInfo.renderer} -> ${rendererPath}`);
+            return null;
+        }
         if (fs.existsSync(rendererPath)) {
             pluginInfo.rendererPath = rendererPath;
             console.log(`[Plugin] 渲染进程入口: ${pluginInfo.name} -> ${rendererPath}`);

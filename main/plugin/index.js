@@ -34,8 +34,10 @@ class PluginManager {
     scanPlugins() {
         if (!this.pluginsDir) return;
 
+        // ponytail: 重新扫描会丢失所有运行时状态（enable/disable），目前可以接受
         this.plugins.clear();
 
+        // 同步 I/O：启动时扫描一次，性能影响可忽略
         let entries;
         try {
             entries = fs.readdirSync(this.pluginsDir, { withFileTypes: true });
@@ -46,11 +48,19 @@ class PluginManager {
 
         for (const entry of entries) {
             if (!entry.isDirectory()) continue;
+            // 跳过以 _ 或 . 开头的目录（示例、临时文件等）
+            if (entry.name.startsWith('_') || entry.name.startsWith('.')) {
+                continue;
+            }
 
             const pluginPath = path.join(this.pluginsDir, entry.name);
             const pluginInfo = loadPlugin(pluginPath);
 
             if (pluginInfo) {
+                if (this.plugins.has(pluginInfo.name)) {
+                    console.warn(`[Plugin] 插件名称冲突: "${pluginInfo.name}"，跳过 ${entry.name}（已在 ${this.plugins.get(pluginInfo.name).path} 中加载）`);
+                    continue;
+                }
                 this.plugins.set(pluginInfo.name, pluginInfo);
                 console.log(`[Plugin] 已加载: ${pluginInfo.name}@${pluginInfo.version}`);
             }
@@ -121,9 +131,12 @@ class PluginManager {
      * 触发指定钩子
      * @param {string} hookName
      * @param {...any} args
+     * @returns {any} 钩子返回值（仅 onConfigLoad 支持管道）
      */
     triggerHook(hookName, ...args) {
         const plugins = this.getByHook(hookName).filter(p => p.enabled);
+        let result = args.length === 1 ? args[0] : args;
+
         for (const plugin of plugins) {
             if (!plugin.mainModule) {
                 console.warn(`[Plugin] 插件 ${plugin.name} 没有主进程模块，跳过钩子 ${hookName}`);
@@ -135,11 +148,21 @@ class PluginManager {
                 continue;
             }
             try {
-                hookFn.apply(plugin.mainModule, args);
+                // onConfigLoad 支持返回值管道：每个插件的返回值作为下一个插件的输入
+                if (hookName === 'onConfigLoad') {
+                    const ret = hookFn.call(plugin.mainModule, result);
+                    if (ret !== undefined) {
+                        result = ret;
+                    }
+                } else {
+                    hookFn.call(plugin.mainModule, ...args);
+                }
             } catch (err) {
                 console.error(`[Plugin] 插件 ${plugin.name} 的 ${hookName} 执行出错: ${err.message}`);
             }
         }
+
+        return hookName === 'onConfigLoad' ? result : undefined;
     }
 
     /**
@@ -159,12 +182,13 @@ class PluginManager {
     }
 
     /**
-     * 获取所有提醒配置
+     * 获取所有提醒配置（仅已启用的插件）
      * @returns {Array<{ plugin: string, type: string, offset: number }>}
      */
     getAllReminders() {
         const reminders = [];
         for (const plugin of this.plugins.values()) {
+            if (!plugin.enabled) continue;
             for (const r of plugin.reminders) {
                 reminders.push({
                     plugin: plugin.name,
