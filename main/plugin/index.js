@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { loadPlugin } = require('./loader');
+const { TimeState, createTimeStateChangeInfo, createScheduleReminder } = require('./lifecycle');
 
 /**
  * 插件管理器
@@ -10,6 +11,10 @@ class PluginManager {
         /** @type {Map<string, object>} name -> pluginInfo */
         this.plugins = new Map();
         this.pluginsDir = null;
+        /** @type {string} 当前时间状态 */
+        this.currentState = null;
+        /** @type {Set<Function>} 状态变化监听器 */
+        this.stateChangeListeners = new Set();
     }
 
     /**
@@ -166,11 +171,21 @@ class PluginManager {
     }
 
     /**
-     * 触发时间状态变化钩子
+     * 触发时间状态变化钩子，更新内部状态并通知监听器
      * @param {object} info
      */
     triggerTimeStateChange(info) {
+        if (info && info.state) {
+            this.currentState = info.state;
+        }
         this.triggerHook('onTimeStateChange', info);
+        for (const listener of this.stateChangeListeners) {
+            try {
+                listener(info);
+            } catch (err) {
+                console.error(`[Plugin] 状态变化监听器执行出错: ${err.message}`);
+            }
+        }
     }
 
     /**
@@ -179,6 +194,26 @@ class PluginManager {
      */
     triggerScheduleReminder(reminder) {
         this.triggerHook('onScheduleReminder', reminder);
+    }
+
+    /**
+     * 注册状态变化监听器
+     * @param {Function} listener - 监听器函数，接收 info 参数
+     */
+    onStateChange(listener) {
+        if (typeof listener !== 'function') {
+            console.warn('[Plugin] onStateChange: listener 必须是函数');
+            return;
+        }
+        this.stateChangeListeners.add(listener);
+    }
+
+    /**
+     * 移除状态变化监听器
+     * @param {Function} listener - 要移除的监听器
+     */
+    offStateChange(listener) {
+        this.stateChangeListeners.delete(listener);
     }
 
     /**
@@ -201,4 +236,4 @@ class PluginManager {
     }
 }
 
-module.exports = { PluginManager };
+module.exports = { PluginManager, TimeState, createTimeStateChangeInfo, createScheduleReminder };
