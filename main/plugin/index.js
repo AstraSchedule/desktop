@@ -86,6 +86,79 @@ class PluginManager {
     }
 
     /**
+     * 启用插件
+     * @param {string} name
+     * @returns {boolean}
+     */
+    enablePlugin(name) {
+        const plugin = this.plugins.get(name);
+        if (!plugin) {
+            console.warn(`[Plugin] 插件不存在: ${name}`);
+            return false;
+        }
+        plugin.enabled = true;
+        console.log(`[Plugin] 已启用: ${name}`);
+        return true;
+    }
+
+    /**
+     * 禁用插件
+     * @param {string} name
+     * @returns {boolean}
+     */
+    disablePlugin(name) {
+        const plugin = this.plugins.get(name);
+        if (!plugin) {
+            console.warn(`[Plugin] 插件不存在: ${name}`);
+            return false;
+        }
+        plugin.enabled = false;
+        console.log(`[Plugin] 已禁用: ${name}`);
+        return true;
+    }
+
+    /**
+     * 触发指定钩子
+     * @param {string} hookName
+     * @param {...any} args
+     */
+    triggerHook(hookName, ...args) {
+        const plugins = this.getByHook(hookName).filter(p => p.enabled);
+        for (const plugin of plugins) {
+            if (!plugin.mainModule) {
+                console.warn(`[Plugin] 插件 ${plugin.name} 没有主进程模块，跳过钩子 ${hookName}`);
+                continue;
+            }
+            const hookFn = plugin.mainModule[hookName];
+            if (typeof hookFn !== 'function') {
+                console.warn(`[Plugin] 插件 ${plugin.name} 的 ${hookName} 不是函数`);
+                continue;
+            }
+            try {
+                hookFn.apply(plugin.mainModule, args);
+            } catch (err) {
+                console.error(`[Plugin] 插件 ${plugin.name} 的 ${hookName} 执行出错: ${err.message}`);
+            }
+        }
+    }
+
+    /**
+     * 触发时间状态变化钩子
+     * @param {object} info
+     */
+    triggerTimeStateChange(info) {
+        this.triggerHook('onTimeStateChange', info);
+    }
+
+    /**
+     * 触发定时提醒钩子
+     * @param {object} reminder
+     */
+    triggerScheduleReminder(reminder) {
+        this.triggerHook('onScheduleReminder', reminder);
+    }
+
+    /**
      * 获取所有提醒配置
      * @returns {Array<{ plugin: string, type: string, offset: number }>}
      */

@@ -166,12 +166,23 @@ function loadPlugin(pluginPath) {
         hooks: json.hooks || [],
         reminders: json.reminders || [],
         path: pluginPath,
+        enabled: true,
+        mainModule: null,
+        rendererPath: null,
     };
 
-    // 检查入口文件是否存在
+    // 检查入口文件是否存在并加载主进程模块
     if (pluginInfo.main) {
         const mainPath = path.join(pluginPath, pluginInfo.main);
-        if (!fs.existsSync(mainPath)) {
+        if (fs.existsSync(mainPath)) {
+            try {
+                pluginInfo.mainModule = require(mainPath);
+                console.log(`[Plugin] 已加载主进程模块: ${pluginInfo.name}`);
+            } catch (err) {
+                console.error(`[Plugin] 加载主进程模块失败 (${pluginInfo.name}): ${err.message}`);
+                return null;
+            }
+        } else {
             console.error(`[Plugin] 主进程入口不存在: ${mainPath}`);
             return null;
         }
@@ -179,7 +190,10 @@ function loadPlugin(pluginPath) {
 
     if (pluginInfo.renderer) {
         const rendererPath = path.join(pluginPath, pluginInfo.renderer);
-        if (!fs.existsSync(rendererPath)) {
+        if (fs.existsSync(rendererPath)) {
+            pluginInfo.rendererPath = rendererPath;
+            console.log(`[Plugin] 渲染进程入口: ${pluginInfo.name} -> ${rendererPath}`);
+        } else {
             console.error(`[Plugin] 渲染进程入口不存在: ${rendererPath}`);
             return null;
         }
