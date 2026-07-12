@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { loadPlugin } = require('./loader');
 const { TimeState, createTimeStateChangeInfo, createScheduleReminder } = require('./lifecycle');
+const { TimeDetector } = require('./time-detector');
 
 /**
  * 插件管理器
@@ -15,6 +16,8 @@ class PluginManager {
         this.currentState = null;
         /** @type {Set<Function>} 状态变化监听器 */
         this.stateChangeListeners = new Set();
+        /** @type {TimeDetector} 时间状态检测器 */
+        this.timeDetector = new TimeDetector(this);
     }
 
     /**
@@ -245,6 +248,29 @@ class PluginManager {
      */
     offStateChange(listener) {
         this.stateChangeListeners.delete(listener);
+    }
+
+    /**
+     * 启动时间状态检测
+     * @param {object} scheduleConfig
+     */
+    startDetection(scheduleConfig) {
+        this.timeDetector.start(scheduleConfig);
+    }
+
+    /**
+     * 停止时间状态检测
+     */
+    stopDetection() {
+        this.timeDetector.stop();
+    }
+
+    /**
+     * 更新检测配置（配置热更新时调用）
+     * @param {object} scheduleConfig
+     */
+    updateDetectionConfig(scheduleConfig) {
+        this.timeDetector.updateConfig(scheduleConfig);
     }
 
     /**
