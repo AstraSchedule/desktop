@@ -15,16 +15,24 @@ const TimeState = Object.freeze({
  * @param {string} params.state - 当前状态 (TimeState.IN_CLASS | TimeState.BREAK)
  * @param {object} params.currentTimeSlot - 当前时间段
  * @param {string} params.currentTime - 当前时间 HH:MM:SS
+ * @param {object} [params.nextTimeSlot] - 下一个时间段
  * @param {string} [params.previousState] - 上一个状态
  * @param {number} [params.timestamp] - 时间戳
  * @returns {object} 时间状态变化信息
  */
-function createTimeStateChangeInfo({ state, currentTimeSlot, currentTime, previousState, timestamp }) {
+function createTimeStateChangeInfo({ state, currentTimeSlot, currentTime, nextTimeSlot, previousState, timestamp }) {
     return {
         state,
         currentTimeSlot,
         nextState: state === TimeState.IN_CLASS ? TimeState.BREAK : TimeState.IN_CLASS,
-        nextTimeSlot: null,
+        nextTimeSlot: nextTimeSlot ? {
+            type: nextTimeSlot.type,
+            index: nextTimeSlot.index,
+            className: nextTimeSlot.className || null,
+            startTime: nextTimeSlot.startTime,
+            endTime: nextTimeSlot.endTime,
+            label: nextTimeSlot.label || null,
+        } : null,
         currentTime,
         previousState,
         timestamp: timestamp || Date.now(),

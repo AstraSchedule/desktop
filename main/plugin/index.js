@@ -133,6 +133,37 @@ class PluginManager {
     }
 
     /**
+     * 销毁插件：调用 onDestroy 并禁用
+     * @param {string} name
+     * @returns {boolean}
+     */
+    destroyPlugin(name) {
+        const plugin = this.plugins.get(name);
+        if (!plugin) return false;
+
+        this.disablePlugin(name);
+
+        if (plugin.mainModule && typeof plugin.mainModule.onDestroy === 'function') {
+            try {
+                plugin.mainModule.onDestroy();
+            } catch (error) {
+                console.error(`[Plugin] ${name}.onDestroy 执行失败:`, error.message);
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * 销毁所有插件
+     */
+    destroyAll() {
+        for (const name of this.plugins.keys()) {
+            this.destroyPlugin(name);
+        }
+    }
+
+    /**
      * 触发指定钩子
      * @param {string} hookName
      * @param {...any} args

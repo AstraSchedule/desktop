@@ -16,6 +16,7 @@ const VALID_HOOKS = [
     'onTick',
     'onTimeStateChange',
     'onScheduleReminder',
+    'onDestroy',
 ];
 
 /**
