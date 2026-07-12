@@ -265,6 +265,20 @@ class PluginManager {
         }
         return reminders;
     }
+
+    /**
+     * 获取所有渲染进程插件信息
+     * @returns {Array<{ name: string, version: string, rendererPath: string }>}
+     */
+    getRendererPlugins() {
+        return this.getAll()
+            .filter(p => p.enabled && p.rendererPath)
+            .map(p => ({
+                name: p.name,
+                version: p.version,
+                rendererPath: p.rendererPath,
+            }));
+    }
 }
 
 module.exports = { PluginManager, TimeState, createTimeStateChangeInfo, createScheduleReminder };

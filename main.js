@@ -12,7 +12,11 @@ const {countdownState} = require('./main/countdown/state');
 const {registerCountdownIpc} = require('./main/countdown/ipc');
 const {processCountdownFromSchedule, pushCountdownItems} = require('./main/countdown/service');
 const {showCountdownWindow, hideCountdownWindow} = require('./main/countdown/window');
+const { PluginManager } = require('./main/plugin');
+const { createTimeStateChangeInfo, createScheduleReminder, TimeState } = require('./main/plugin/lifecycle');
 
+// 创建插件管理器实例
+const pluginManager = new PluginManager();
 
 
 // 添加全局错误处理，防止未捕获的异常导致弹窗
@@ -664,8 +668,11 @@ function getScheduleFromCloud() {
         })
         response.on('end', () => {
             try {
-                const scheduleConfigSync = JSON.parse(raw)
+                let scheduleConfigSync = JSON.parse(raw)
                 console.log('Received schedule config from cloud:', scheduleConfigSync)
+
+                // 触发 onConfigLoad 钩子，允许插件修改配置
+                scheduleConfigSync = pluginManager.triggerHook('onConfigLoad', scheduleConfigSync)
 
                 // 检查返回的 JSON 中是否含有 version 键
                 if (scheduleConfigSync.version !== undefined) {
@@ -750,6 +757,27 @@ app.whenReady().then(() => {
     createWindow()
     Menu.setApplicationMenu(null)
     registerCountdownIpc(countdownCtx)
+
+    // 扫描并加载插件
+    pluginManager.init(path.join(app.getPath('userData'), 'plugins'));
+
+    // 启用已保存的启用状态
+    const enabledPlugins = store.get('plugins', {});
+    for (const [name, config] of Object.entries(enabledPlugins)) {
+        if (config.enabled) {
+            pluginManager.enablePlugin(name);
+        }
+    }
+
+    // 触发 onInit
+    pluginManager.triggerHook('onInit', {
+        app,
+        BrowserWindow,
+        ipcMain,
+        store,
+        logger: console
+    });
+
     setupAutoUpdater()
     // 先进行网络连接检查，然后获取课表数据
     getScheduleFromCloudWithRetry().then(() => {});
@@ -1489,4 +1517,33 @@ ipcMain.on('setClass', (e, arg) => {
 ipcMain.on('getScheduleFromCloud', () => {
     // 直接调用 getScheduleFromCloud 函数
     getScheduleFromCloud();
+});
+
+// 插件系统 IPC 处理器
+ipcMain.handle('get-plugin-list', () => {
+    return pluginManager.getAll();
+});
+
+ipcMain.handle('enable-plugin', (event, name) => {
+    const success = pluginManager.enablePlugin(name);
+    if (success) {
+        const plugins = store.get('plugins', {});
+        plugins[name] = { enabled: true };
+        store.set('plugins', plugins);
+    }
+    return success;
+});
+
+ipcMain.handle('disable-plugin', (event, name) => {
+    const success = pluginManager.disablePlugin(name);
+    if (success) {
+        const plugins = store.get('plugins', {});
+        plugins[name] = { enabled: false };
+        store.set('plugins', plugins);
+    }
+    return success;
+});
+
+ipcMain.handle('get-renderer-plugins', () => {
+    return pluginManager.getRendererPlugins();
 });
