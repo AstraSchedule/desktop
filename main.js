@@ -13,6 +13,7 @@ const {registerCountdownIpc} = require('./main/countdown/ipc');
 const {processCountdownFromSchedule, pushCountdownItems} = require('./main/countdown/service');
 const {showCountdownWindow, hideCountdownWindow} = require('./main/countdown/window');
 const { PluginManager } = require('./main/plugin');
+const { createPluginMenu } = require('./main/plugin/menu');
 const { createTimeStateChangeInfo, createScheduleReminder, TimeState } = require('./main/plugin/lifecycle');
 
 // 创建插件管理器实例
@@ -985,6 +986,7 @@ ipcMain.on('getWeekIndex', (e, arg) => {
         {
             type: 'separator'
         },
+        createPluginMenu(pluginManager),
         {
             icon: asset('image', 'toggle.png'),
             label: '调试选项',
