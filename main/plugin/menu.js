@@ -18,6 +18,22 @@ function savePluginState(name, enabled) {
 }
 
 /**
+ * 恢复所有插件的启用/禁用状态
+ * @param {import('./index').PluginManager} pluginManager
+ */
+function restoreAllPluginStates(pluginManager) {
+    const savedPlugins = store.get('plugins', {});
+    for (const plugin of pluginManager.getAll()) {
+        const saved = savedPlugins[plugin.name];
+        if (saved && saved.enabled) {
+            pluginManager.enablePlugin(plugin.name);
+        } else {
+            pluginManager.disablePlugin(plugin.name);
+        }
+    }
+}
+
+/**
  * 创建插件管理菜单
  * @param {import('./index').PluginManager} pluginManager
  * @returns {Electron.MenuItemConstructorOptions} 菜单模板
@@ -76,11 +92,7 @@ function createPluginMenu(pluginManager) {
                         try {
                             fs.cpSync(srcDir, destDir, { recursive: true });
                             pluginManager.scanPlugins();
-                            // 恢复已保存的启用状态
-                            const savedPlugins = store.get('plugins', {});
-                            for (const [name, config] of Object.entries(savedPlugins)) {
-                                if (config.enabled) pluginManager.enablePlugin(name);
-                            }
+                            restoreAllPluginStates(pluginManager);
                             dialog.showMessageBox({
                                 type: 'info',
                                 message: `插件 "${path.basename(srcDir)}" 安装成功。`,
@@ -93,6 +105,44 @@ function createPluginMenu(pluginManager) {
                         }
                     });
                 }
+            },
+            {
+                label: '卸载插件',
+                submenu: allPlugins.length === 0
+                    ? [{ label: '暂无已安装插件', enabled: false }]
+                    : allPlugins.map(plugin => ({
+                        label: plugin.name,
+                        sublabel: plugin.version ? `v${plugin.version}` : undefined,
+                        click: () => {
+                            dialog.showMessageBox({
+                                type: 'warning',
+                                buttons: ['取消', '卸载'],
+                                defaultId: 0,
+                                title: '卸载插件',
+                                message: `确定要卸载插件 "${plugin.name}" 吗？\n此操作将永久删除插件文件。`,
+                            }).then(result => {
+                                if (result.response !== 1) return;
+
+                                try {
+                                    pluginManager.destroyPlugin(plugin.name);
+                                    fs.rmSync(plugin.path, { recursive: true, force: true });
+                                    // 清除保存的状态
+                                    const savedPlugins = store.get('plugins', {});
+                                    delete savedPlugins[plugin.name];
+                                    store.set('plugins', savedPlugins);
+                                    dialog.showMessageBox({
+                                        type: 'info',
+                                        message: `插件 "${plugin.name}" 已卸载。`,
+                                    });
+                                } catch (err) {
+                                    dialog.showMessageBox({
+                                        type: 'error',
+                                        message: `卸载失败: ${err.message}`,
+                                    });
+                                }
+                            });
+                        }
+                    })),
             },
             { type: 'separator' },
             {
@@ -109,10 +159,7 @@ function createPluginMenu(pluginManager) {
                 label: '刷新插件列表',
                 click: () => {
                     pluginManager.scanPlugins();
-                    const savedPlugins = store.get('plugins', {});
-                    for (const [name, config] of Object.entries(savedPlugins)) {
-                        if (config.enabled) pluginManager.enablePlugin(name);
-                    }
+                    restoreAllPluginStates(pluginManager);
                     console.log(`[Plugin] 插件列表已刷新，共 ${pluginManager.getAll().length} 个插件`);
                 }
             },

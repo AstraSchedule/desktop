@@ -762,11 +762,15 @@ app.whenReady().then(() => {
     // 扫描并加载插件
     pluginManager.init(path.join(app.getPath('userData'), 'plugins'));
 
-    // 启用已保存的启用状态
-    const enabledPlugins = store.get('plugins', {});
-    for (const [name, config] of Object.entries(enabledPlugins)) {
-        if (config.enabled) {
-            pluginManager.enablePlugin(name);
+    // 恢复已保存的插件启用/禁用状态
+    // 先全部禁用（loadPlugin 默认 enabled: true），再按存储状态恢复
+    const savedPlugins = store.get('plugins', {});
+    for (const plugin of pluginManager.getAll()) {
+        const saved = savedPlugins[plugin.name];
+        if (saved && saved.enabled) {
+            pluginManager.enablePlugin(plugin.name);
+        } else {
+            pluginManager.disablePlugin(plugin.name);
         }
     }
 
@@ -1260,7 +1264,7 @@ ipcMain.on('RequestSyncConfig', () => {
             method: 'POST',
             url: `${agreement}://${getServer()}/api/broadcast/${classId}`,
             headers: {
-                "Authorization": 'Basic ' + Buffer.from('ElectronClassSchedule:' + String(r)).toString('base64'),
+                "Authorization": 'Basic ' + Buffer.from('AstraSchedule:' + String(r)).toString('base64'),
             }
         })
         try {
