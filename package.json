@@ -1,7 +1,7 @@
 {
   "name": "electron_class_schedule",
   "version": "2147483647.1.0",
-  "description": "classSchedule",
+  "description": "灵活部署 · 智能调休 · 集中管控 · 兼容 Windows 7",
   "main": "main.js",
   "author": "KuoHu",
   "license": "GPLv3",
