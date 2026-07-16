@@ -758,13 +758,11 @@ ipcRenderer.on('getScheduleForDebugCalibration', () => {
 })
 
 ipcRenderer.on('fromCloud', () => {
-    let uri = localStorage.getItem('server');
-    ipcRenderer.send('fromCloud', uri === null ? "class.getastra.cn" : uri.toString())
+    ipcRenderer.send('fromCloud')
 })
 
 ipcRenderer.on('setClass', () => {
-    let uri = localStorage.getItem('class');
-    ipcRenderer.send('setClass', uri === null ? "39/2023/1" : uri.toString())
+    ipcRenderer.send('setClass')
 })
 
 ipcRenderer.on('setCloudUrl', (e, arg) => {
