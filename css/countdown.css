@@ -145,7 +145,6 @@ html, body {
 }
 
 .secondary {
-    /* 保持与主卡一致的内边距，避免视觉边距不统一 */
     gap: 6px;
 }
 
@@ -161,6 +160,24 @@ html, body {
 .secondary .sentence {
     font-size: 15px;
     color: rgba(255, 255, 255, 0.85);
+}
+
+/* 2 条时左右卡片字体统一 */
+.main-layout.layout-2 .secondary {
+    height: 100%;
+    background: rgba(0, 0, 0, 0.25);
+    gap: 12px;
+}
+.main-layout.layout-2 .secondary .name {
+    font-size: calc(34px * var(--primary-font-scale));
+}
+.main-layout.layout-2 .secondary .days {
+    font-size: calc(84px * var(--primary-font-scale));
+    line-height: 1;
+}
+.main-layout.layout-2 .secondary .sentence {
+    font-size: calc(20px * var(--primary-font-scale));
+    color: rgba(255, 255, 255, 0.9);
 }
 
 .countdown-root.minimized {
