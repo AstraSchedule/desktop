@@ -63,17 +63,23 @@ function createItemNode(item, isPrimary) {
 
 function renderExpanded(layoutRoot, items) {
     layoutRoot.innerHTML = '';
+    // 清除旧布局类
+    layoutRoot.classList.remove('layout-1', 'layout-2');
     if (!Array.isArray(items) || items.length === 0) return;
 
     if (items.length === 1) {
+        layoutRoot.classList.add('layout-1');
         const only = createItemNode(items[0], true);
         only.classList.add('single');
         layoutRoot.appendChild(only);
         return;
     }
 
+    if (items.length === 2) {
+        layoutRoot.classList.add('layout-2');
+    }
+
     // 规则：左侧主卡 1 条；右侧最多展示 4 条（总计最多展示 5 条）
-    // 这样可避免条目过多时右侧严重挤压导致显示异常。
     const primaryItem = items[0];
     const secondaryItems = items.length >= 5 ? items.slice(1, 5) : items.slice(1);
 
@@ -83,7 +89,12 @@ function renderExpanded(layoutRoot, items) {
 
     const right = document.createElement('div');
     right.className = 'right-pane';
-    right.style.gridTemplateRows = `repeat(${Math.max(1, secondaryItems.length)}, minmax(0, 1fr))`;
+    if (items.length === 2) {
+        // 2 条时右侧单行等高
+        right.style.gridTemplateRows = '1fr';
+    } else {
+        right.style.gridTemplateRows = `repeat(${Math.max(1, secondaryItems.length)}, minmax(0, 1fr))`;
+    }
 
     for (const it of secondaryItems) {
         right.appendChild(createItemNode(it, false));
