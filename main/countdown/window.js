@@ -5,8 +5,8 @@ function getExpandedBounds(screen, itemCount = 1) {
     const count = Math.max(1, Number(itemCount) || 1);
     const width = Math.max(720, Math.floor(workArea.width * 0.62));
     // 条目越少窗口越紧凑，避免 1-2 条时大面积空白
-    const ratio = count <= 1 ? 0.28 : count <= 2 ? 0.38 : Math.min(0.56, 0.34 + Math.max(0, count - 1) * 0.045);
-    const height = Math.max(count <= 1 ? 280 : 320, Math.floor(workArea.height * ratio));
+    const ratio = count <= 1 ? 0.24 : count <= 2 ? 0.36 : Math.min(0.56, 0.34 + Math.max(0, count - 1) * 0.045);
+    const height = Math.max(count <= 1 ? 240 : 320, Math.floor(workArea.height * ratio));
     const x = Math.floor(workArea.x + (workArea.width - width) / 2);
     const y = Math.floor(workArea.y + (workArea.height - height) / 2);
     return {x, y, width, height};

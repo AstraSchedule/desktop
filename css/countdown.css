@@ -30,7 +30,7 @@ html, body {
 }
 
 /* 单条目：整行居中，不走左右分栏 */
-.countdown-root.layout-1 .main-layout {
+.main-layout.layout-1 {
     grid-template-columns: 1fr;
     place-items: center;
 }
@@ -67,7 +67,7 @@ html, body {
 }
 
 /* 2 条目：左右等宽 */
-.countdown-root.layout-2 .main-layout {
+.main-layout.layout-2 {
     grid-template-columns: 1fr 1fr;
 }
 
@@ -102,7 +102,6 @@ html, body {
 }
 
 .card.single {
-    max-width: 500px;
     width: 100%;
     height: auto;
     align-self: center;
