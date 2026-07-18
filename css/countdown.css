@@ -106,18 +106,6 @@ html, body {
     height: auto;
     align-self: center;
     background: rgba(0, 0, 0, 0.25);
-    /* 单条卡片不需要 primary 的巨大字号 */
-    gap: 8px;
-}
-.card.single .name {
-    font-size: 24px;
-}
-.card.single .days {
-    font-size: 52px;
-    line-height: 1;
-}
-.card.single .sentence {
-    font-size: 16px;
 }
 
 .primary {
