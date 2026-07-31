@@ -49,9 +49,10 @@ function ensureCountdownWindow(ctx) {
         alwaysOnTop: false,
         autoHideMenuBar: true,
         webPreferences: {
-            nodeIntegration: true,
-            contextIsolation: false,
-            enableRemoteModule: true,
+            preload: path.join(__dirname, '..', '..', 'main', 'preload-countdown.js'),
+            nodeIntegration: false,
+            contextIsolation: true,
+            sandbox: true,
         },
     });
 

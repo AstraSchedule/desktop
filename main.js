@@ -447,9 +447,10 @@ const createWindow = () => {
         resizable: false,
         type: 'toolbar',
         webPreferences: {
-            nodeIntegration: true,
-            contextIsolation: false,
-            enableRemoteModule: true
+            preload: path.join(__dirname, 'main', 'preload.js'),
+            nodeIntegration: false,
+            contextIsolation: true,
+            sandbox: true,
         },
     })
     // win.webContents.openDevTools()

@@ -1,4 +1,6 @@
-const { ipcRenderer } = require('electron');
+// 渲染进程通过 preload（contextBridge）暴露的受限 IPC 桥接，
+// 不再直接 require('electron')，nodeIntegration 已关闭
+const ipcRenderer = window.astraIPC;
 
 // 新增：深合并与用户配置加载/保存
 function isPlainObject(x) {
