@@ -334,16 +334,9 @@ function connect(rejectUnauthorized = true, resetErrorFlag = false) {
             // 直接在主进程中更新 Tooltip
             updateTrayTooltip(false, websocketDisabled);
 
-            if (rejectUnauthorized) {
-                // 尝试连接不验证证书
-                console.log('Trying to connect without certificate verification...');
-                setTimeout(() => {
-                    connect(false, false);
-                }, 100);
-            } else {
-                // 已经尝试了不验证证书，现在安排重连
-                scheduleReconnect();
-            }
+            // 安全修复：不再降级为“不验证证书”重连（fail-open）。
+            // 证书验证失败时按正常策略重连，保持 TLS 证书校验，防止中间人（MITM）攻击
+            scheduleReconnect();
         })
     } catch (err) {
         console.error('WebSocket create error:', err)
