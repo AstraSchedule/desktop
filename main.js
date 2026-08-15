@@ -916,12 +916,8 @@ ipcMain.on('getWeekIndex', (e, arg) => {
             icon: asset('image', 'toggle.png'),
             label: '更新课表',
             click: () => {
-                // Serverless 模式下直接拉取课表，无需广播
-                if (websocketDisabled) {
-                    getScheduleFromCloud();
-                    return;
-                }
-                win.webContents.send('broadcastSyncConfig')
+                // 与 Serverless 模式一致：直接拉取课表（服务端已废弃外部广播入口）
+                getScheduleFromCloud();
             }
         },
         {
@@ -1204,50 +1200,6 @@ ipcMain.on('getWeather', () => {
     if (weatherRequestInFlight || weatherRetryTimer) return
     weatherRetryCount = 0
     requestWeatherWithRetry()
-})
-
-ipcMain.on('RequestSyncConfig', () => {
-    prompt({
-        title: '云端密码',
-        label: '请输入密码：',
-        value: "",
-        inputAttrs: { type: 'password' },
-        type: 'input',
-        height: 180,
-        width: 400,
-        icon: asset('image', 'toggle.png'),
-    }).then((r) => {
-        if (r === null) return;
-        const { agreement } = getProtocols()
-        // noinspection JSCheckFunctionSignatures
-        const request = astraRequest({
-            method: 'POST',
-            url: `${agreement}://${getServer()}/api/broadcast/${classId}`,
-            headers: {
-                "Authorization": 'Basic ' + Buffer.from('ElectronClassSchedule:' + String(r)).toString('base64'),
-            }
-        })
-        try {
-            request.on('response', (response) => {
-                response.on('data', () => {})
-                response.on('end', () => {
-                    const { dialog } = require('electron');
-                    if (response.statusCode === 200) {
-                        dialog.showMessageBox(
-                            { type: 'info', title: '提示', message: '已下发成功', buttons: ['已阅'] }).then(doNothing)
-                    } else if (response.statusCode === 401) {
-                        dialog.showMessageBox({ type: 'error', title: '错误', message: '服务端返回 401，可能密码错误', buttons: ['已阅'] }).then(doNothing)
-                    } else {
-                        dialog.showMessageBox({ type: 'error', title: '错误', message: `服务端返回 ${response.statusCode}` , buttons: ['已阅'] }).then(doNothing)
-                    }
-                })
-            })
-        } catch (e) {
-            console.log(e)
-        }
-        request.on('error', (err) => console.error('Broadcast request error:', err))
-        request.end()
-    })
 })
 
 // 处理来自渲染进程的tray状态更新请求
