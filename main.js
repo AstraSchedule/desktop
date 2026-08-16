@@ -622,11 +622,18 @@ async function getScheduleFromCloudWithRetry(maxRetries = 10) {
     return false
 }
 
+// 课表拉取并发控制：记录最新一次请求的序号。托盘连点 / WS 推送 / 自动刷新 / 失败重试
+// 可能并发触发，响应到达时只允许最新请求生效，过期响应直接丢弃，防止旧配置覆盖新配置
+let scheduleFetchSeq = 0
+
 function getScheduleFromCloud() {
     const { agreement } = getProtocols()
     // 添加 version 查询参数
     const url = `${agreement}://${getServer()}/${classId}?version=${currentVersion}`
     console.log('Requesting schedule from cloud:', url);
+
+    // 本次请求的序号，响应到达时校验是否仍为最新请求
+    const mySeq = ++scheduleFetchSeq
 
     // noinspection JSCheckFunctionSignatures
     const request = astraRequest({
@@ -659,6 +666,20 @@ function getScheduleFromCloud() {
         response.on('end', () => {
             try {
                 const scheduleConfigSync = JSON.parse(raw)
+
+                // 过期响应保护：已有更新的请求在途，或返回版本低于本地已应用版本，
+                // 直接丢弃，不得更新 currentVersion / lastScheduleConfig / 倒数日缓存 / newConfig 推送
+                if (mySeq !== scheduleFetchSeq) {
+                    console.warn('[Schedule] Discard stale response: superseded by a newer request')
+                    return
+                }
+                if (scheduleConfigSync.version !== undefined) {
+                    const respVersion = Number.parseInt(scheduleConfigSync.version)
+                    if (!Number.isNaN(respVersion) && respVersion < currentVersion) {
+                        console.warn(`[Schedule] Discard stale response: version ${respVersion} < ${currentVersion}`)
+                        return
+                    }
+                }
                 console.log('Received schedule config from cloud:', scheduleConfigSync)
 
                 // 检查返回的 JSON 中是否含有 version 键
