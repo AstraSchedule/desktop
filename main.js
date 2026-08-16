@@ -653,9 +653,13 @@ function getScheduleFromCloud() {
 
         if (statusCode < 200 || statusCode >= 300) {
             console.error('getScheduleFromCloud request failed with status:', statusCode);
-            // 尝试重连
-            if (statusCode !== 304) {
-                setTimeout(getScheduleFromCloud, 5000)
+            // 仅最新请求允许安排重试；被替代的请求不得发起后续请求（调度时与执行时双重校验）
+            if (mySeq === scheduleFetchSeq) {
+                setTimeout(() => {
+                    if (mySeq === scheduleFetchSeq) {
+                        getScheduleFromCloud()
+                    }
+                }, 5000)
             }
             return;
         }
@@ -750,8 +754,14 @@ function getScheduleFromCloud() {
     request.on('error', (err) => {
         console.error('getScheduleFromCloud request error:', err)
         // 不显示错误弹窗，仅记录错误
-        // 稍后重试
-        setTimeout(getScheduleFromCloud, 5000)
+        // 仅最新请求允许重试，且回调执行前再次校验，被替代的请求不得发起后续请求
+        if (mySeq === scheduleFetchSeq) {
+            setTimeout(() => {
+                if (mySeq === scheduleFetchSeq) {
+                    getScheduleFromCloud()
+                }
+            }, 5000)
+        }
     })
     request.end()
 }
