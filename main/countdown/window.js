@@ -2,7 +2,6 @@ const path = require('node:path');
 
 function getExpandedBounds(screen, itemCount = 1) {
     const workArea = screen.getPrimaryDisplay().workArea;
-    const count = Math.max(1, Number(itemCount) || 1);
     const width = Math.max(720, Math.floor(workArea.width * 0.62));
     // 固定窗口高度，内容自适应
     const height = 500;
@@ -81,7 +80,7 @@ function showCountdownWindow(ctx) {
     const win = ensureCountdownWindow(ctx);
     applyModeBounds(win, screen, state.minimized, (state.latestItems || []).length || 1);
     if (!win.isVisible()) {
-        if (win.webContents && win.webContents.isLoading()) {
+        if (win.webContents?.isLoading()) {
             win.once('ready-to-show', () => {
                 if (!win.isDestroyed() && !win.isVisible()) {
                     win.showInactive();
