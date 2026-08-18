@@ -1,9 +1,7 @@
 // 渲染进程通过 preload（contextBridge）暴露的受限 IPC 桥接，
 // 不再直接 require('electron')，nodeIntegration 已关闭
+/* global scheduleConfig, weekIndex, timeOffset, dayOffset, setDayOffsetLastDay */
 const ipcRenderer = window.astraIPC;
-
-// 全局课表配置引用：默认值由 scheduleConfig.js 提供，此处声明后由用户配置合并/重置
-let scheduleConfig;
 
 // 新增：深合并与用户配置加载/保存
 function isPlainObject(x) {
@@ -263,7 +261,7 @@ function initBannerMarquee() {
 
 function changeScheduleClass(classHtml, inner) {
     if (scheduleData.currentHighlight.isEnd)
-        classHtml += `<div class="class" id="highlighted" style="color:rgba(166,166,166);">${formatFullName(inner)}</div>`
+        classHtml += `<div class="class ended" id="highlighted">${formatFullName(inner)}</div>`
     else if (scheduleData.currentHighlight.type === 'current')
         // 根据网络连接状态设置当前课程的类
         classHtml += `<div class="class current ${wsConnected ? '' : 'disconnected'}" id="highlighted">${formatFullName(inner)}</div>`
@@ -280,7 +278,7 @@ function setScheduleClass() {
         if (scheduleData.currentHighlight.index === i) {
             classHtml = changeScheduleClass(classHtml, inner)
         } else if (scheduleData.currentHighlight.index > i)
-            classHtml += `<div class="class" style="color:rgba(166,166,166);">${formatFullName(inner)}</div>`
+            classHtml += `<div class="class ended">${formatFullName(inner)}</div>`
         else
             classHtml += `<div class="class">${formatFullName(inner)}</div>`
         if (scheduleData.divider.includes(i))
@@ -318,8 +316,11 @@ function applyDisplayState(showMain, showMini, showGlobal) {
 
 // 渲染小窗口的当前课程与倒计时文本
 function renderCurrentClassToMiniCountdown(color, fullName, countdownText) {
-    // 仅渲染文本，避免对 currentFullName.innerText 的副作用
-    miniCountdown.innerHTML = `<div class="currentClass" style="color: ${color}">${formatFullName(fullName)}</div><div class="countdown" style="margin-left:5px">${countdownText}</div>`
+    // 仅渲染文本，避免对 currentFullName.innerText 的副作用；
+    // 颜色通过 CSSOM 设置（style 属性会被 CSP style-src 拦截）
+    miniCountdown.innerHTML = `<div class="currentClass">${formatFullName(fullName)}</div><div class="countdown">${countdownText}</div>`
+    const currentClassEl = miniCountdown.querySelector('.currentClass');
+    if (currentClassEl) currentClassEl.style.color = color;
 }
 
 function setCountdownerContent() {
@@ -353,7 +354,9 @@ function setCountdownerContent() {
     } else if (isAlwaysMinimized) {
         applyDisplayState(false, true, false)
         const nextClass = scheduleData.nextScheduleName || '明天';  // “明天” 意味着今天的课程已经结束
-        miniCountdown.innerHTML = `<div class="currentClass" style="color: ${miniColor}">${formatFullName(highlight.fullName)}</div><div class="countdown" style="margin-left:5px">${highlight.countdownText}</div> | 下一节：<span class="class upcoming" id="highlighted">${formatFullName(nextClass)}</span>`
+        miniCountdown.innerHTML = `<div class="currentClass">${formatFullName(highlight.fullName)}</div><div class="countdown">${highlight.countdownText}</div> | 下一节：<span class="class upcoming" id="highlighted">${formatFullName(nextClass)}</span>`
+        const miniCurrentEl = miniCountdown.querySelector('.currentClass');
+        if (miniCurrentEl) miniCurrentEl.style.color = miniColor;
     } else {
         applyDisplayState(true, false, true)
     }
@@ -729,8 +732,8 @@ document.addEventListener("click", function (event) {
 
 ipcRenderer.on('setWeekIndex', (e, arg) => {
     scheduleConfig = structuredClone(_scheduleConfig)
-    window.weekIndex = arg
-    localStorage.setItem('weekIndex', String(window.weekIndex))
+    weekIndex = arg
+    localStorage.setItem('weekIndex', String(weekIndex))
 })
 
 ipcRenderer.on('getWeekIndex', () => {
@@ -744,7 +747,7 @@ ipcRenderer.on('getTimeOffset', () => {
 })
 
 ipcRenderer.on('setTimeOffset', (e, arg) => {
-    window.timeOffset = arg
+    timeOffset = arg
     localStorage.setItem('timeOffset', String(arg))
 })
 
@@ -999,14 +1002,14 @@ function handleDayOffsetResult(arg) {
     if (arg.index <= 6) {
         localStorage.setItem('dayOffset', String(arg.index))
         localStorage.setItem('setDayOffsetLastDay', String(new Date().getDay()))
-        window.dayOffset = arg.index
-        window.setDayOffsetLastDay = new Date().getDay()
+        dayOffset = arg.index
+        setDayOffsetLastDay = new Date().getDay()
         return
     }
     localStorage.setItem('dayOffset', '-1')
     localStorage.setItem('setDayOffsetLastDay', '-1')
-    window.dayOffset = -1
-    window.setDayOffsetLastDay = -1
+    dayOffset = -1
+    setDayOffsetLastDay = -1
 }
 
 ipcRenderer.on('setWeather', (e, arg) => {

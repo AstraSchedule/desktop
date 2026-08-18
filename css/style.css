@@ -71,6 +71,10 @@
     margin: 0 var(--main-horizontal-space);
 }
 
+.ended {
+    color: rgba(166, 166, 166, 1);
+}
+
 .current {
     color: rgba(0, 255, 10, 1);
 }
@@ -185,6 +189,10 @@
     color: rgba(255, 255, 255, 1);
     display: inline;
     font-family: Rec, serif;
+}
+
+.miniCountdown .countdown {
+    margin-left: 5px;
 }
 
 /*noinspection CssUnresolvedCustomProperty*/
