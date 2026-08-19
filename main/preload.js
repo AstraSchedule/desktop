@@ -25,8 +25,7 @@ const INVOKE_CHANNELS = new Set([
 
 const ON_CHANNELS = new Set([
     'showMainWindow',
-    'getSelectedClassIndex',
-    'getSelectedChangingClass',
+    'dialogResult',
     'openSettingDialog',
     'setWeekIndex',
     'getWeekIndex',
@@ -43,7 +42,6 @@ const ON_CHANNELS = new Set([
     'ClassHidden',
     'AlwaysMinimized',
     'setDayOffset',
-    'getDayOffset',
     'setWeather',
     'debugInputChanged',
     'updateWeather',

@@ -1,5 +1,6 @@
 // 渲染进程通过 preload（contextBridge）暴露的受限 IPC 桥接，
 // 不再直接 require('electron')，nodeIntegration 已关闭
+/* global scheduleConfig, weekIndex, timeOffset, dayOffset, setDayOffsetLastDay */
 const ipcRenderer = window.astraIPC;
 
 // 新增：深合并与用户配置加载/保存
@@ -260,7 +261,7 @@ function initBannerMarquee() {
 
 function changeScheduleClass(classHtml, inner) {
     if (scheduleData.currentHighlight.isEnd)
-        classHtml += `<div class="class" id="highlighted" style="color:rgba(166,166,166);">${formatFullName(inner)}</div>`
+        classHtml += `<div class="class ended" id="highlighted">${formatFullName(inner)}</div>`
     else if (scheduleData.currentHighlight.type === 'current')
         // 根据网络连接状态设置当前课程的类
         classHtml += `<div class="class current ${wsConnected ? '' : 'disconnected'}" id="highlighted">${formatFullName(inner)}</div>`
@@ -277,7 +278,7 @@ function setScheduleClass() {
         if (scheduleData.currentHighlight.index === i) {
             classHtml = changeScheduleClass(classHtml, inner)
         } else if (scheduleData.currentHighlight.index > i)
-            classHtml += `<div class="class" style="color:rgba(166,166,166);">${formatFullName(inner)}</div>`
+            classHtml += `<div class="class ended">${formatFullName(inner)}</div>`
         else
             classHtml += `<div class="class">${formatFullName(inner)}</div>`
         if (scheduleData.divider.includes(i))
@@ -305,55 +306,71 @@ function formatFullName(fullName) {
     return fullName.replaceAll(/@(.+)/g, '<sub>$1</sub>');
 }
 
+// 统一设置倒计时主体/小窗口/全局容器的显示状态
+function applyDisplayState(showMain, showMini, showGlobal) {
+    countdownContainer.style.display = showMain ? 'block' : 'none'
+    miniCountdown.style.display = showMini ? 'block' : 'none'
+    const globalContainer = document.getElementById('globalContainer');
+    if (globalContainer) globalContainer.style.display = showGlobal ? 'block' : 'none'
+}
+
+// 渲染小窗口的当前课程与倒计时文本
+function renderCurrentClassToMiniCountdown(color, fullName, countdownText) {
+    // 仅渲染文本，避免对 currentFullName.innerText 的副作用；
+    // 颜色通过 CSSOM 设置（style 属性会被 CSP style-src 拦截）
+    miniCountdown.innerHTML = `<div class="currentClass">${formatFullName(fullName)}</div><div class="countdown">${countdownText}</div>`
+    const currentClassEl = miniCountdown.querySelector('.currentClass');
+    if (currentClassEl) currentClassEl.style.color = color;
+}
+
 function setCountdownerContent() {
-    currentFullName.innerHTML = formatFullName(scheduleData.currentHighlight.fullName);
+    const highlight = scheduleData.currentHighlight;
+    currentFullName.innerHTML = formatFullName(highlight.fullName);
     // 根据连接状态和课程类型设置颜色
-    if (scheduleData.currentHighlight.type === 'current') {
+    if (highlight.type === 'current') {
         // 当前课程：如果连接正常为绿色，连接异常时为橙色
         currentFullName.style.color = wsConnected ? 'rgba(0, 255, 10, 1)' : 'rgba(255, 165, 0, 1)';
     } else {
         // 非当前课程保持黄色
         currentFullName.style.color = 'rgba(255, 255, 5, 1)';
     }
-    countdownText.innerText = scheduleData.currentHighlight.countdownText;
+    countdownText.innerText = highlight.countdownText;
 
-    const globalContainer = document.getElementById('globalContainer');
+    // 小窗口当前课程颜色：当前课程跟随连接状态，其余为黄色（断开时橙色）
+    const miniColor = highlight.type === 'current'
+        ? (wsConnected ? 'rgba(0, 255, 10, 1)' : 'rgba(255, 165, 0, 1)')
+        : (wsConnected ? 'rgba(255, 255, 5, 1)' : 'rgba(255, 165, 0, 1)');
 
-    if (scheduleData.currentHighlight.type === 'current') {
-        if (isClassCountdown) {
-            if (isClassHidden) { // 上课 并且开启了倒计时 并且 隐藏主体 -> 显示小窗口
-                countdownContainer.style.display = 'none'
-                miniCountdown.style.display = 'block'
-                if (globalContainer) globalContainer.style.display = 'none'
-                // 仅渲染文本，避免对 currentFullName.innerText 的副作用
-                // 根据网络连接状态设置currentClass的颜色
-                const currentClassColor = wsConnected ? 'rgba(0, 255, 10, 1)' : 'rgba(255, 165, 0, 1)';
-                miniCountdown.innerHTML = `<div class="currentClass" style="color: ${currentClassColor}">${formatFullName(scheduleData.currentHighlight.fullName)}</div><div class="countdown" style="margin-left:5px">${scheduleData.currentHighlight.countdownText}</div>`
-            } else { // 上课 并且开启了倒计时 并且 不隐藏主体 -> 正常计时
-                countdownContainer.style.display = 'block'
-                miniCountdown.style.display = 'none'
-                if (globalContainer) globalContainer.style.display = 'block'
-            }
-        } else { // 上课 并且关闭了倒计时 -> 都不显示
-            countdownContainer.style.display = 'none'
-            miniCountdown.style.display = 'none'
-            if (globalContainer) globalContainer.style.display = 'none'
-        }
+    if (highlight.type === 'current' && isClassCountdown && isClassHidden) {
+        // 上课 并且开启了倒计时 并且 隐藏主体 -> 显示小窗口
+        applyDisplayState(false, true, false)
+        renderCurrentClassToMiniCountdown(miniColor, highlight.fullName, highlight.countdownText)
+    } else if (highlight.type === 'current' && isClassCountdown) {
+        // 上课 并且开启了倒计时 并且 不隐藏主体 -> 正常计时
+        applyDisplayState(true, false, true)
+    } else if (highlight.type === 'current') {
+        // 上课 并且关闭了倒计时 -> 都不显示
+        applyDisplayState(false, false, false)
     } else if (isAlwaysMinimized) {
-        countdownContainer.style.display = 'none'
-        miniCountdown.style.display = 'block'
-        if (globalContainer) globalContainer.style.display = 'none'
-        const currentClassColor = wsConnected ? 'rgba(255, 255, 5, 1)' : 'rgba(255, 165, 0, 1)';
+        applyDisplayState(false, true, false)
         const nextClass = scheduleData.nextScheduleName || '明天';  // “明天” 意味着今天的课程已经结束
-        miniCountdown.innerHTML = `<div class="currentClass" style="color: ${currentClassColor}">${formatFullName(scheduleData.currentHighlight.fullName)}</div><div class="countdown" style="margin-left:5px">${scheduleData.currentHighlight.countdownText}</div> | 下一节：<span class="class upcoming" id="highlighted">${formatFullName(nextClass)}</span>`
+        miniCountdown.innerHTML = `<div class="currentClass">${formatFullName(highlight.fullName)}</div><div class="countdown">${highlight.countdownText}</div> | 下一节：<span class="class upcoming" id="highlighted">${formatFullName(nextClass)}</span>`
+        const miniCurrentEl = miniCountdown.querySelector('.currentClass');
+        if (miniCurrentEl) miniCurrentEl.style.color = miniColor;
     } else {
-        countdownContainer.style.display = 'block';
-        miniCountdown.style.display = 'none'
-        if (globalContainer) globalContainer.style.display = 'block'
+        applyDisplayState(true, false, true)
     }
 }
 
+// 记录是否已完成首次定位：首次瞬间到位（避免启动时从居中位置动画漂移），
+// 后续课程切换的位移使用 .countdownContainer 的 2s 过渡平滑滑动
+let countdownPositionInitialized = false;
+
 function setCountdownerPosition() {
+    // 窗口尚未显示（display:none）时布局尺寸不可用，位置计算无效；
+    // 此时跳过定位，等窗口显示后的首次定位再执行（避免错误位置与漂移）
+    if (!root || getComputedStyle(root).display === 'none') return;
+
     let offset = {};
     const dividerWidth = Number(getComputedStyle(root).getPropertyValue('--divider-width').replace('px', ''));
     const dividerMargin = Number(getComputedStyle(root).getPropertyValue('--divider-margin').replace('px', ''));
@@ -396,18 +413,27 @@ function setCountdownerPosition() {
         };
     }
 
-    // 临时禁用过渡效果，避免初始位置设置时触发动画
-    const originalTransition = countdownContainer.style.transition;
-    countdownContainer.style.transition = 'none';
+    if (!countdownPositionInitialized) {
+        // 首次定位瞬间到位：临时禁用过渡，避免启动时从居中位置动画漂移
+        const originalTransition = countdownContainer.style.transition;
+        countdownContainer.style.transition = 'none';
 
+        countdownContainer.style.left = offset.x + 'px';
+        countdownContainer.style.top = offset.y + 'px';
+        countdownContainer.style.transform = 'none';
+
+        countdownContainer.getBoundingClientRect();
+
+        // 恢复过渡效果
+        countdownContainer.style.transition = originalTransition;
+        countdownPositionInitialized = true;
+        return;
+    }
+
+    // 后续位移：使用 2s 过渡平滑滑动到新位置
     countdownContainer.style.left = offset.x + 'px';
     countdownContainer.style.top = offset.y + 'px';
     countdownContainer.style.transform = 'none';
-
-    void countdownContainer.offsetHeight;
-
-    // 恢复过渡效果
-    countdownContainer.style.transition = originalTransition;
 }
 
 function setSidebar() {
@@ -528,7 +554,7 @@ async function initDomAndStart() {
         '--sub-font-size': '20px',
         '--banner-height': '30px',
     }
-    const mergedCss = { ...defaultCss, ...(scheduleConfig.css_style || {}) }
+    const mergedCss = { ...defaultCss, ...scheduleConfig.css_style }
     for (const key in mergedCss) {
         root.style.setProperty(key, mergedCss[key])
     }
@@ -622,10 +648,15 @@ async function initDomAndStart() {
     // 尝试应用一次 banner，以处理初始化前产生的更新
     setBanner();
 
-    // 初始化 countdownContainer 的位置为居中，避免动画从左侧开始
+    // 初始化 countdownContainer 的位置为居中，避免动画从左侧开始；
+    // 临时禁用过渡，确保居中设置瞬间生效（不产生启动漂移动画）
     if (countdownContainer && classContainer) {
+        const initialTransition = countdownContainer.style.transition;
+        countdownContainer.style.transition = 'none';
         countdownContainer.style.left = '50%';
         countdownContainer.style.transform = 'translateX(-50%)';
+        countdownContainer.getBoundingClientRect();
+        countdownContainer.style.transition = initialTransition;
     }
 
     // 启动心跳渲染（在合并配置后再启动）
@@ -642,16 +673,28 @@ globalThis.addEventListener('DOMContentLoaded', () => {
         if (pendingShow && root) {
             root.style.display = 'block'
             pendingShow = false
+            tickOnceOnShow()
         }
     }).catch(() => {
     })
 })
 
 let pendingShow = false
+let initialTickDone = false
+
+// 窗口显示后立即执行一次渲染与定位：首次定位在窗口显示的第一帧渲染前完成，
+// 窗口一出现倒计时块就已在课程位置（首次定位仍为瞬间到位）
+function tickOnceOnShow() {
+    if (initialTickDone) return
+    initialTickDone = true
+    tick(true)
+}
+
 ipcRenderer.on('showMainWindow', () => {
     console.log('[Show] display change')
     if (root) {
         root.style.display = 'block'
+        tickOnceOnShow()
     } else {
         pendingShow = true
     }
@@ -672,25 +715,25 @@ function setScheduleDialog() {
     })
 }
 
-ipcRenderer.on('getSelectedClassIndex', (e, arg) => {
-    if (arg.index === -1) return
+function handleSelectedClassIndex(index) {
+    if (index === -1) return
     let classes = Object.keys(scheduleConfig.subject_name).sort((a,b)=>a.localeCompare(b));
     ipcRenderer.send('dialog', {
         reply: 'getSelectedChangingClass',
-        index: arg.index,
+        index: index,
         classes: classes,
         options: {
             title: '更改课表',
-            message: `将 第 ${arg.index + 1} 节 ${formatFullName(scheduleConfig.subject_name[scheduleData.scheduleArray[arg.index]])} 更改为:`,
+            message: `将 第 ${index + 1} 节 ${formatFullName(scheduleConfig.subject_name[scheduleData.scheduleArray[index]])} 更改为:`,
             buttons: classes.map((value) => {
                 return formatFullName(scheduleConfig.subject_name[value])
             }),
             cancelId: -1,
         }
     })
-})
+}
 
-ipcRenderer.on('getSelectedChangingClass', (e, arg) => {
+function handleSelectedChangingClass(arg) {
     if (arg.index === -1) return
     let index = arg.arg.index;
     let selectedClass = arg.arg.classes[arg.index];
@@ -698,6 +741,17 @@ ipcRenderer.on('getSelectedChangingClass', (e, arg) => {
     const dayOfWeek = getCurrentEditedDay(date);
     scheduleConfig.daily_class[dayOfWeek].classList[index] = selectedClass;
     // 不持久化：改课仅在本次会话有效
+}
+
+// 对话框结果统一分发（主进程固定使用 dialogResult 通道回复）
+ipcRenderer.on('dialogResult', (e, arg) => {
+    if (arg.arg.reply === 'getSelectedClassIndex') {
+        handleSelectedClassIndex(arg.index)
+    } else if (arg.arg.reply === 'getSelectedChangingClass') {
+        handleSelectedChangingClass(arg)
+    } else if (arg.arg.reply === 'getDayOffset') {
+        handleDayOffsetResult(arg)
+    }
 })
 
 ipcRenderer.on('openSettingDialog', () => {
@@ -713,7 +767,7 @@ document.addEventListener("click", function (event) {
 ipcRenderer.on('setWeekIndex', (e, arg) => {
     scheduleConfig = structuredClone(_scheduleConfig)
     weekIndex = arg
-    localStorage.setItem('weekIndex', weekIndex.toString())
+    localStorage.setItem('weekIndex', String(weekIndex))
 })
 
 ipcRenderer.on('getWeekIndex', () => {
@@ -728,7 +782,7 @@ ipcRenderer.on('getTimeOffset', () => {
 
 ipcRenderer.on('setTimeOffset', (e, arg) => {
     timeOffset = arg
-    localStorage.setItem('timeOffset', arg.toString())
+    localStorage.setItem('timeOffset', String(arg))
 })
 
 // 调试矫正：发送当前课表数据给主进程
@@ -781,63 +835,59 @@ ipcRenderer.on('setCloudSec', (e, arg) => {
     console.log('[Renderer] setCloudSec =', isSecureConnection)
 })
 
+// 离散模式：遍历 stops，找首个 t < stop.temp 的端点，使用其颜色；
+// 全部不满足（t >= 所有 stop.temp）时使用最后一个 stop 的颜色
+function resolveDiscreteColor(t, stops) {
+    for (const stop of stops) {
+        if (t < stop.temp) return stop.color
+    }
+    return stops.length > 0 ? stops.at(-1).color : undefined
+}
+
+// 根据温度与颜色配置解析显示颜色（渐变/离散/无配置回退）；
+// 返回 undefined 表示不改变当前颜色
+function resolveTemperatureColor(t, cfg) {
+    if (!cfg?.stops?.length) {
+        // 配置不存在时的回退行为（保持原硬编码逻辑）
+        return t < 24 ? "#66CCFF" : (t <= 26 ? "#5FBC21" : "#EE0000")
+    }
+    if (cfg.use_gradient) {
+        if (typeof interpolateGradientColor === 'function') {
+            // 渐变模式：在相邻端点间线性插值
+            return interpolateGradientColor(t, cfg.stops)
+        }
+        // 回退到离散匹配（保持原行为：未命中时不修改颜色）
+        for (const stop of cfg.stops) {
+            if (t < stop.temp) return stop.color
+        }
+        return undefined
+    }
+    return resolveDiscreteColor(t, cfg.stops)
+}
+
 // 小函数：温度与天气状态更新
 function applyTemperature(arg){
     if (!temperature || !weather) return; // DOM 未就绪时跳过，避免警告
     const rawTemp = Number(arg['temp'])
     // 应用调试输入偏移值
     const offset = Number(scheduleConfig.debug_input_value || '0')
-    const t = isNaN(rawTemp) ? NaN : (rawTemp + offset)
-    temperature.innerText = (isNaN(t) ? '-' : t) + "℃"
-    if (!isNaN(t)) {
-        const cfg = scheduleConfig.temperature_colors
-        if (cfg && cfg.stops && cfg.stops.length > 0) {
-            if (cfg.use_gradient) {
-                // 渐变模式：在相邻端点间线性插值（函数在 Task 7 中实现）
-                if (typeof interpolateGradientColor === 'function') {
-                    temperature.style.color = interpolateGradientColor(t, cfg.stops)
-                } else {
-                    // 回退到离散模式
-                    for (const stop of cfg.stops) {
-                        if (t < stop.temp) {
-                            temperature.style.color = stop.color
-                            break
-                        }
-                    }
-                }
-            } else {
-                // 离散模式：遍历 stops，找首个 t < stop.temp 的端点，使用其颜色
-                let matched = false
-                for (const stop of cfg.stops) {
-                    if (t < stop.temp) {
-                        temperature.style.color = stop.color
-                        matched = true
-                        break
-                    }
-                }
-                // 如果所有 stops 都不满足（t >= 所有 stop.temp），使用最后一个 stop 的颜色
-                if (!matched && cfg.stops.length > 0) {
-                    temperature.style.color = cfg.stops[cfg.stops.length - 1].color
-                }
-            }
-        } else {
-            // 配置不存在时的回退行为（保持原硬编码逻辑）
-            if (t < 24) temperature.style.color = "#66CCFF"
-            else if (t <= 26) temperature.style.color = "#5FBC21"
-            else temperature.style.color = "#EE0000"
-        }
+    const t = Number.isNaN(rawTemp) ? Number.NaN : (rawTemp + offset)
+    temperature.innerText = (Number.isNaN(t) ? '-' : t) + "℃"
+    if (!Number.isNaN(t)) {
+        const color = resolveTemperatureColor(t, scheduleConfig.temperature_colors)
+        if (color !== undefined) temperature.style.color = color
     }
     weather.innerText = String(arg['weat'] ?? '')
 }
 
 // 颜色插值辅助：在两个 hex 颜色间按比例线性插值（RGB 空间）
 function lerpColor(c1, c2, ratio) {
-    const r1 = parseInt(c1.slice(1, 3), 16)
-    const g1 = parseInt(c1.slice(3, 5), 16)
-    const b1 = parseInt(c1.slice(5, 7), 16)
-    const r2 = parseInt(c2.slice(1, 3), 16)
-    const g2 = parseInt(c2.slice(3, 5), 16)
-    const b2 = parseInt(c2.slice(5, 7), 16)
+    const r1 = Number.parseInt(c1.slice(1, 3), 16)
+    const g1 = Number.parseInt(c1.slice(3, 5), 16)
+    const b1 = Number.parseInt(c1.slice(5, 7), 16)
+    const r2 = Number.parseInt(c2.slice(1, 3), 16)
+    const g2 = Number.parseInt(c2.slice(3, 5), 16)
+    const b2 = Number.parseInt(c2.slice(5, 7), 16)
     const r = Math.round(r1 + (r2 - r1) * ratio)
     const g = Math.round(g1 + (g2 - g1) * ratio)
     const b = Math.round(b1 + (b2 - b1) * ratio)
@@ -860,7 +910,7 @@ function interpolateGradientColor(t, stops) {
     }
 
     // 超出所有端点范围，使用最后一个端点的颜色
-    if (matchedIndex === -1) return sorted[sorted.length - 1].color
+    if (matchedIndex === -1) return sorted.at(-1).color
     // 低于第一个端点，使用第一个端点的颜色
     if (matchedIndex === 0) return sorted[0].color
 
@@ -936,7 +986,7 @@ ipcRenderer.on('newConfig', (e, arg) => {
         '--sub-font-size': '20px',
         '--banner-height': '30px',
     }
-    const mergedCss2 = { ...defaultCss2, ...(scheduleConfig.css_style || {}) }
+    const mergedCss2 = { ...defaultCss2, ...scheduleConfig.css_style }
     for (const key in mergedCss2) {
         root.style.setProperty(key, mergedCss2[key])
     }
@@ -981,14 +1031,12 @@ ipcRenderer.on('setDayOffset', () => {
     })
 })
 
-ipcRenderer.on('getDayOffset', (e, arg) => {
+function handleDayOffsetResult(arg) {
     if (arg.index === -1) return
     if (arg.index <= 6) {
-        localStorage.setItem('dayOffset', arg.index.toString())
-        localStorage.setItem('setDayOffsetLastDay', new Date().getDay().toString())
-        // noinspection JSUndeclaredVariable
+        localStorage.setItem('dayOffset', String(arg.index))
+        localStorage.setItem('setDayOffsetLastDay', String(new Date().getDay()))
         dayOffset = arg.index
-        // noinspection JSUndeclaredVariable
         setDayOffsetLastDay = new Date().getDay()
         return
     }
@@ -996,7 +1044,7 @@ ipcRenderer.on('getDayOffset', (e, arg) => {
     localStorage.setItem('setDayOffsetLastDay', '-1')
     dayOffset = -1
     setDayOffsetLastDay = -1
-})
+}
 
 ipcRenderer.on('setWeather', (e, arg) => {
     applyTemperature(arg)
@@ -1067,6 +1115,15 @@ ipcRenderer.on('ws-status', (e, arg) => {
     }
 });
 
+// 计算 currentFullName 的显示颜色：当前课程跟随连接状态，其余保持黄色
+function currentFullNameColor(connected, shouldForceGreen) {
+    if (scheduleData.currentHighlight.type !== 'current') {
+        return 'rgba(255, 255, 5, 1)'; // 非当前课程保持黄色
+    }
+    // 强制绿色或连接正常时为绿色，断开时为橙色
+    return (shouldForceGreen || connected) ? 'rgba(0, 255, 10, 1)' : 'rgba(255, 165, 0, 1)';
+}
+
 // 根据连接状态更新UI颜色
 function updateUIColorsForConnectionStatus(connected) {
     // 检查是否应强制显示为绿色
@@ -1074,19 +1131,7 @@ function updateUIColorsForConnectionStatus(connected) {
     console.log('[Renderer] Updating UI colors for connection status:', connected, 'forceGreen:', shouldForceGreen);
 
     if (currentFullName && scheduleData?.currentHighlight?.type) {
-        if (scheduleData.currentHighlight.type === 'current') {
-            if (shouldForceGreen) {
-                // 如果强制绿色，总是显示绿色
-                currentFullName.style.color = 'rgba(0, 255, 10, 1)';
-                console.log('[Renderer] Set currentFullName color to green (forced)');
-            } else {
-                // 根据连接状态设置颜色：连接时为绿色，断开时为橙色
-                currentFullName.style.color = connected ? 'rgba(0, 255, 10, 1)' : 'rgba(255, 165, 0, 1)';
-                console.log('[Renderer] Set currentFullName color to', connected ? 'green' : 'orange');
-            }
-        } else {
-            currentFullName.style.color = 'rgba(255, 255, 5, 1)'; // 非当前课程保持黄色
-        }
+        currentFullName.style.color = currentFullNameColor(connected, shouldForceGreen);
     } else {
         console.log('[Renderer] currentFullName or scheduleData not ready, deferring color update');
     }

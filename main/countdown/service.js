@@ -45,6 +45,24 @@ function scopeMatch(scope, classId) {
     return false;
 }
 
+// 解析单条记录的日程列表，过滤过期日程
+function collectScheduleItems(schedules) {
+    const out = [];
+    for (const it of Array.isArray(schedules) ? schedules : []) {
+        const name = String(it?.name || '').trim();
+        const date = String(it?.date || '').trim();
+        const priority = Number(it?.priority || 0);
+        if (!name || !date) continue;
+        const localDate = parseYmdLocal(date);
+        if (!localDate) continue;
+        const daysLeft = dayDiffLocalToday(localDate);
+        // 过期日程自动隐藏（仅展示今天及未来）
+        if (daysLeft < 0) continue;
+        out.push({name, date, priority, daysLeft});
+    }
+    return out;
+}
+
 function collectEffectiveSchedules(records, classId) {
     const out = [];
     for (const rec of Array.isArray(records) ? records : []) {
@@ -52,19 +70,7 @@ function collectEffectiveSchedules(records, classId) {
         if (scopes.length > 0 && !scopes.some((s) => scopeMatch(s, classId))) {
             continue;
         }
-        const schedules = Array.isArray(rec.schedules) ? rec.schedules : [];
-        for (const it of schedules) {
-            const name = String(it?.name || '').trim();
-            const date = String(it?.date || '').trim();
-            const priority = Number(it?.priority || 0);
-            if (!name || !date) continue;
-            const localDate = parseYmdLocal(date);
-            if (!localDate) continue;
-            const daysLeft = dayDiffLocalToday(localDate);
-            // 过期日程自动隐藏（仅展示今天及未来）
-            if (daysLeft < 0) continue;
-            out.push({name, date, priority, daysLeft});
-        }
+        out.push(...collectScheduleItems(rec.schedules));
     }
     out.sort((a, b) => {
         if (b.priority !== a.priority) return b.priority - a.priority;

@@ -84,6 +84,84 @@ function setCurrentHighlightExternal(currentHighlight, index, type, fullName, en
         if (isEnd) currentHighlight.isEnd = true;
     }
 
+// 从 startIndex 起查找下一节课程；返回其完整名称，找不到返回 null
+function findNextSubjectFullName(dayTimetable, timeRanges, startIndex, currentSchedule) {
+    for (let i = startIndex; i < timeRanges.length; i++) {
+        const nextClassIndex = dayTimetable[timeRanges[i]];
+        if (typeof nextClassIndex === 'number') {
+            const nextSubjectShortName = currentSchedule[nextClassIndex];
+            return scheduleConfig.subject_name[nextSubjectShortName];
+        }
+    }
+    return null;
+}
+
+// 课间/无课时段：定位下一节课或放学标签，返回 nextScheduleName（无下一节时为 null）
+function findUpcomingSchedule(breakIndex, breakRange, dayTimetable, timeRanges, currentSchedule, currentHighlight, scheduleArray, currentTime) {
+    // 选择接下来最近的一节课作为 upcoming（高亮位置用下一节课），
+    // 但显示的文字应为当前课间/时段在 timetable 中配置的标签。
+    let breakLabel = '';
+    const curVal = dayTimetable[breakRange];
+    if (typeof curVal !== 'number' && curVal) breakLabel = String(curVal);
+
+    // 如果 timetable 没给当前时段配置标签，则尝试向后找第一个字符串标签做为显示
+    if (!breakLabel) {
+        for (let i = breakIndex; i < timeRanges.length; i++) {
+            const v = dayTimetable[timeRanges[i]];
+            if (typeof v !== 'number' && v) {
+                breakLabel = String(v);
+                break;
+            }
+        }
+    }
+    // 兜底课间标签
+    if (!breakLabel) breakLabel = (scheduleConfig['break_label']) || '课间';
+
+    // 选择下一节课用于定位 upcoming 的 index
+    const nextScheduleName = findNextSubjectFullName(dayTimetable, timeRanges, breakIndex + 1, currentSchedule);
+    if (nextScheduleName) {
+        // scheduleArray.length 指向下一节在列表中的位置
+        setCurrentHighlightExternal(
+            currentHighlight,
+            scheduleArray.length,
+            'upcoming',
+            breakLabel, // 注意：显示当前课间/标签，而不是下一节课名
+            breakRange.split('-')[1],
+            currentTime
+        );
+        return nextScheduleName;
+    }
+
+    // 没有后续课程：遵循 timetable 的字符串标签，而不是恒定“放学”
+    // 1) 优先使用后续时段中出现的第一个字符串标签
+    let followingLabel = '';
+    for (let i = breakIndex + 1; i < timeRanges.length; i++) {
+        const v = dayTimetable[timeRanges[i]];
+        if (typeof v !== 'number' && v) {
+            followingLabel = String(v);
+            break;
+        }
+    }
+    // 2) 若没有后续标签，则尝试用当前时段本身的标签（通常就是“放学”等）
+    if (!followingLabel) {
+        const curVal2 = dayTimetable[breakRange];
+        if (typeof curVal2 !== 'number' && curVal2) followingLabel = String(curVal2);
+    }
+    // 3) 仍无则回退到 end_of_day_label 或默认"放学"
+    const dismissalFallback = (scheduleConfig['end_of_day_label']) || '放学';
+    const dismissalLabel = followingLabel || dismissalFallback;
+    setCurrentHighlightExternal(
+        currentHighlight,
+        Math.max(0, currentSchedule.length - 1),
+        'upcoming',
+        dismissalLabel,
+        breakRange.split('-')[1],
+        currentTime,
+        true
+    );
+    return null;
+}
+
 function getScheduleData() {
     const currentSchedule = getCurrentDaySchedule();
     const currentTime = getCurrentTime();
@@ -91,81 +169,11 @@ function getScheduleData() {
     const timetable = scheduleConfig.daily_class[dayOfWeek].timetable;
     const dayTimetable = scheduleConfig.timetable[timetable];
     const divider = scheduleConfig.divider[timetable];
-    let scheduleArray = [];
-    let currentHighlight = { index: null, type: null, fullName: null, countdown: null, countdownText: null };
+    const scheduleArray = [];
+    const currentHighlight = { index: null, type: null, fullName: null, countdown: null, countdownText: null };
     let nextScheduleName = null; // 下一节课的名称
 
     const timeRanges = Object.keys(dayTimetable);
-
-    const findUpcoming = (breakIndex, breakRange) => {
-        // 选择接下来最近的一节课作为 upcoming（高亮位置用下一节课），
-        // 但显示的文字应为当前课间/时段在 timetable 中配置的标签。
-        let breakLabel = '';
-        const curVal = dayTimetable[breakRange];
-        if (typeof curVal !== 'number' && curVal) breakLabel = String(curVal);
-
-        // 如果 timetable 没给当前时段配置标签，则尝试向后找第一个字符串标签做为显示
-        if (!breakLabel) {
-            for (let i = breakIndex; i < timeRanges.length; i++) {
-                const v = dayTimetable[timeRanges[i]];
-                if (typeof v !== 'number' && v) {
-                    breakLabel = String(v);
-                    break;
-                }
-            }
-        }
-        // 兜底课间标签
-        if (!breakLabel) breakLabel = (scheduleConfig['break_label']) || '课间';
-
-        // 选择下一节课用于定位 upcoming 的 index
-        for (let i = breakIndex + 1; i < timeRanges.length; i++) {
-            const nextTimeRange = timeRanges[i];
-            const nextClassIndex = dayTimetable[nextTimeRange];
-            if (typeof nextClassIndex === 'number') {
-                // 获取下一节课的名称
-                const nextSubjectShortName = currentSchedule[nextClassIndex];
-                nextScheduleName = scheduleConfig.subject_name[nextSubjectShortName];
-                // scheduleArray.length 指向下一节在列表中的位置
-                setCurrentHighlightExternal(
-                    currentHighlight,
-                    scheduleArray.length,
-                    'upcoming',
-                    breakLabel, // 注意：显示当前课间/标签，而不是下一节课名
-                    breakRange.split('-')[1],
-                    currentTime
-                );
-                return true;
-            }
-        }
-        // 没有后续课程：遵循 timetable 的字符串标签，而不是恒定“放学”
-        // 1) 优先使用后续时段中出现的第一个字符串标签
-        let followingLabel = '';
-        for (let i = breakIndex + 1; i < timeRanges.length; i++) {
-            const v = dayTimetable[timeRanges[i]];
-            if (typeof v !== 'number' && v) {
-                followingLabel = String(v);
-                break;
-            }
-        }
-        // 2) 若没有后续标签，则尝试用当前时段本身的标签（通常就是“放学”等）
-        if (!followingLabel) {
-            const curVal2 = dayTimetable[breakRange];
-            if (typeof curVal2 !== 'number' && curVal2) followingLabel = String(curVal2);
-        }
-        // 3) 仍无则回退到 end_of_day_label 或默认"放学"
-        const dismissalFallback = (scheduleConfig['end_of_day_label']) || '放学';
-        const dismissalLabel = followingLabel || dismissalFallback;
-        setCurrentHighlightExternal(
-            currentHighlight,
-            Math.max(0, currentSchedule.length - 1),
-            'upcoming',
-            dismissalLabel,
-            breakRange.split('-')[1],
-            currentTime,
-            true
-        );
-        return false;
-    }
 
     for (const [index, timeRange] of timeRanges.entries()) {
         const [startTime, endTime] = timeRange.split('-');
@@ -179,19 +187,12 @@ function getScheduleData() {
             if (isClassCurrent(startTime, endTime, currentTime)) {
                 setCurrentHighlightExternal(currentHighlight, scheduleArray.length - 1, 'current', subjectFullName, endTime, currentTime);
                 // 查找下一节课的名称
-                for (let i = index + 1; i < timeRanges.length; i++) {
-                    const nextTimeRange = timeRanges[i];
-                    const nextClassIndex = dayTimetable[nextTimeRange];
-                    if (typeof nextClassIndex === 'number') {
-                        const nextSubjectShortName = currentSchedule[nextClassIndex];
-                        nextScheduleName = scheduleConfig.subject_name[nextSubjectShortName];
-                        break;
-                    }
-                }
+                const nextFullName = findNextSubjectFullName(dayTimetable, timeRanges, index + 1, currentSchedule);
+                if (nextFullName) nextScheduleName = nextFullName;
             }
         } else if (currentHighlight.index === null && isBreakTime(startTime, endTime, currentTime)) {
             // 课间：寻找下一节课
-            findUpcoming(index, timeRange);
+            nextScheduleName = findUpcomingSchedule(index, timeRange, dayTimetable, timeRanges, currentSchedule, currentHighlight, scheduleArray, currentTime);
         } else if (currentHighlight.index === null && !dayTimetable[timeRange]) {
             currentHighlight.fullName = currentSchedule[classIndex];
         }
@@ -200,14 +201,7 @@ function getScheduleData() {
     // 如果没有找到当前课程或课间，尝试设置下一节课的名称
     if (currentHighlight.index === null && nextScheduleName === null) {
         // 查找第一节课作为下一节课
-        for (const [index, timeRange] of timeRanges.entries()) {
-            const classIndex = dayTimetable[timeRange];
-            if (typeof classIndex === 'number') {
-                const subjectShortName = currentSchedule[classIndex];
-                nextScheduleName = scheduleConfig.subject_name[subjectShortName];
-                break;
-            }
-        }
+        nextScheduleName = findNextSubjectFullName(dayTimetable, timeRanges, 0, currentSchedule);
     }
 
     return {scheduleArray, currentHighlight, timetable, divider, nextScheduleName};
