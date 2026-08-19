@@ -362,6 +362,10 @@ function setCountdownerContent() {
     }
 }
 
+// 记录是否已完成首次定位：首次瞬间到位（避免启动时从居中位置动画漂移），
+// 后续课程切换的位移使用 .countdownContainer 的 2s 过渡平滑滑动
+let countdownPositionInitialized = false;
+
 function setCountdownerPosition() {
     let offset = {};
     const dividerWidth = Number(getComputedStyle(root).getPropertyValue('--divider-width').replace('px', ''));
@@ -405,18 +409,27 @@ function setCountdownerPosition() {
         };
     }
 
-    // 临时禁用过渡效果，避免初始位置设置时触发动画
-    const originalTransition = countdownContainer.style.transition;
-    countdownContainer.style.transition = 'none';
+    if (!countdownPositionInitialized) {
+        // 首次定位瞬间到位：临时禁用过渡，避免启动时从居中位置动画漂移
+        const originalTransition = countdownContainer.style.transition;
+        countdownContainer.style.transition = 'none';
 
+        countdownContainer.style.left = offset.x + 'px';
+        countdownContainer.style.top = offset.y + 'px';
+        countdownContainer.style.transform = 'none';
+
+        countdownContainer.getBoundingClientRect();
+
+        // 恢复过渡效果
+        countdownContainer.style.transition = originalTransition;
+        countdownPositionInitialized = true;
+        return;
+    }
+
+    // 后续位移：使用 2s 过渡平滑滑动到新位置
     countdownContainer.style.left = offset.x + 'px';
     countdownContainer.style.top = offset.y + 'px';
     countdownContainer.style.transform = 'none';
-
-    countdownContainer.getBoundingClientRect();
-
-    // 恢复过渡效果
-    countdownContainer.style.transition = originalTransition;
 }
 
 function setSidebar() {
