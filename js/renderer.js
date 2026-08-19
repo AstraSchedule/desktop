@@ -367,6 +367,10 @@ function setCountdownerContent() {
 let countdownPositionInitialized = false;
 
 function setCountdownerPosition() {
+    // 窗口尚未显示（display:none）时布局尺寸不可用，位置计算无效；
+    // 此时跳过定位，等窗口显示后的首次定位再执行（避免错误位置与漂移）
+    if (!root || getComputedStyle(root).display === 'none') return;
+
     let offset = {};
     const dividerWidth = Number(getComputedStyle(root).getPropertyValue('--divider-width').replace('px', ''));
     const dividerMargin = Number(getComputedStyle(root).getPropertyValue('--divider-margin').replace('px', ''));
