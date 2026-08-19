@@ -644,10 +644,15 @@ async function initDomAndStart() {
     // 尝试应用一次 banner，以处理初始化前产生的更新
     setBanner();
 
-    // 初始化 countdownContainer 的位置为居中，避免动画从左侧开始
+    // 初始化 countdownContainer 的位置为居中，避免动画从左侧开始；
+    // 临时禁用过渡，确保居中设置瞬间生效（不产生启动漂移动画）
     if (countdownContainer && classContainer) {
+        const initialTransition = countdownContainer.style.transition;
+        countdownContainer.style.transition = 'none';
         countdownContainer.style.left = '50%';
         countdownContainer.style.transform = 'translateX(-50%)';
+        countdownContainer.getBoundingClientRect();
+        countdownContainer.style.transition = initialTransition;
     }
 
     // 启动心跳渲染（在合并配置后再启动）
@@ -664,16 +669,28 @@ globalThis.addEventListener('DOMContentLoaded', () => {
         if (pendingShow && root) {
             root.style.display = 'block'
             pendingShow = false
+            tickOnceOnShow()
         }
     }).catch(() => {
     })
 })
 
 let pendingShow = false
+let initialTickDone = false
+
+// 窗口显示后立即执行一次渲染与定位：首次定位在窗口显示的第一帧渲染前完成，
+// 窗口一出现倒计时块就已在课程位置（首次定位仍为瞬间到位）
+function tickOnceOnShow() {
+    if (initialTickDone) return
+    initialTickDone = true
+    tick(true)
+}
+
 ipcRenderer.on('showMainWindow', () => {
     console.log('[Show] display change')
     if (root) {
         root.style.display = 'block'
+        tickOnceOnShow()
     } else {
         pendingShow = true
     }
