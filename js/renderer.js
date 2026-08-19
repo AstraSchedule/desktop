@@ -1078,14 +1078,6 @@ ipcRenderer.on('updateWeather', () => {
     ipcRenderer.send('getWeather', false)
 })
 
-ipcRenderer.on('broadcastSyncConfig', () => {
-    // Serverless 模式下直接拉取课表，无需广播
-    if (globalThis.websocketDisabled) {
-        ipcRenderer.send('getScheduleFromCloud');
-        return;
-    }
-    ipcRenderer.send('RequestSyncConfig', false)
-})
 
 
 // WebSocket连接状态处理

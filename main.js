@@ -622,11 +622,18 @@ async function getScheduleFromCloudWithRetry(maxRetries = 10) {
     return false
 }
 
+// 课表拉取并发控制：记录最新一次请求的序号。托盘连点 / WS 推送 / 自动刷新 / 失败重试
+// 可能并发触发，响应到达时只允许最新请求生效，过期响应直接丢弃，防止旧配置覆盖新配置
+let scheduleFetchSeq = 0
+
 function getScheduleFromCloud() {
     const { agreement } = getProtocols()
     // 添加 version 查询参数
     const url = `${agreement}://${getServer()}/${classId}?version=${currentVersion}`
     console.log('Requesting schedule from cloud:', url);
+
+    // 本次请求的序号，响应到达时校验是否仍为最新请求
+    const mySeq = ++scheduleFetchSeq
 
     // noinspection JSCheckFunctionSignatures
     const request = astraRequest({
@@ -646,9 +653,13 @@ function getScheduleFromCloud() {
 
         if (statusCode < 200 || statusCode >= 300) {
             console.error('getScheduleFromCloud request failed with status:', statusCode);
-            // 尝试重连
-            if (statusCode !== 304) {
-                setTimeout(getScheduleFromCloud, 5000)
+            // 仅最新请求允许安排重试；被替代的请求不得发起后续请求（调度时与执行时双重校验）
+            if (mySeq === scheduleFetchSeq) {
+                setTimeout(() => {
+                    if (mySeq === scheduleFetchSeq) {
+                        getScheduleFromCloud()
+                    }
+                }, 5000)
             }
             return;
         }
@@ -657,21 +668,27 @@ function getScheduleFromCloud() {
             raw += chunk.toString()
         })
         response.on('end', () => {
-            handleCloudSchedulePayload(raw)
+            handleCloudSchedulePayload(raw, mySeq)
             console.log('No more data in response.')
         })
     })
     request.on('error', (err) => {
         console.error('getScheduleFromCloud request error:', err)
         // 不显示错误弹窗，仅记录错误
-        // 稍后重试
-        setTimeout(getScheduleFromCloud, 5000)
+        // 仅最新请求允许重试，且回调执行前再次校验，被替代的请求不得发起后续请求
+        if (mySeq === scheduleFetchSeq) {
+            setTimeout(() => {
+                if (mySeq === scheduleFetchSeq) {
+                    getScheduleFromCloud()
+                }
+            }, 5000)
+        }
     })
     request.end()
 }
 
 // 处理云端课表响应：解析 JSON 并应用版本/WebSocket/窗口行为
-function handleCloudSchedulePayload(rawPayload) {
+function handleCloudSchedulePayload(rawPayload, mySeq) {
     let scheduleConfigSync
     try {
         scheduleConfigSync = JSON.parse(rawPayload)
@@ -679,6 +696,19 @@ function handleCloudSchedulePayload(rawPayload) {
         console.error('getScheduleFromCloud JSON parse error:', err)
         // 不显示错误弹窗，仅记录错误
         return
+    }
+    // 过期响应保护：已有更新的请求在途，或返回版本低于本地已应用版本，
+    // 直接丢弃，不得更新 currentVersion / lastScheduleConfig / 倒数日缓存 / newConfig 推送
+    if (mySeq !== scheduleFetchSeq) {
+        console.warn('[Schedule] Discard stale response: superseded by a newer request')
+        return
+    }
+    if (scheduleConfigSync.version !== undefined) {
+        const respVersion = Number.parseInt(scheduleConfigSync.version)
+        if (!Number.isNaN(respVersion) && respVersion < currentVersion) {
+            console.warn('[Schedule] Discard stale response: version ' + respVersion + ' < ' + currentVersion)
+            return
+        }
     }
     console.log('Received schedule config from cloud:', scheduleConfigSync)
 
@@ -923,12 +953,8 @@ ipcMain.on('getWeekIndex', (e, arg) => {
             icon: asset('image', 'toggle.png'),
             label: '更新课表',
             click: () => {
-                // Serverless 模式下直接拉取课表，无需广播
-                if (websocketDisabled) {
-                    getScheduleFromCloud();
-                    return;
-                }
-                win.webContents.send('broadcastSyncConfig')
+                // 与 Serverless 模式一致：直接拉取课表（服务端已废弃外部广播入口）
+                getScheduleFromCloud();
             }
         },
         {
@@ -1212,50 +1238,6 @@ ipcMain.on('getWeather', () => {
     if (weatherRequestInFlight || weatherRetryTimer) return
     weatherRetryCount = 0
     requestWeatherWithRetry()
-})
-
-ipcMain.on('RequestSyncConfig', () => {
-    prompt({
-        title: '云端密码',
-        label: '请输入密码：',
-        value: "",
-        inputAttrs: { type: 'password' },
-        type: 'input',
-        height: 180,
-        width: 400,
-        icon: asset('image', 'toggle.png'),
-    }).then((r) => {
-        if (r === null) return;
-        const { agreement } = getProtocols()
-        // noinspection JSCheckFunctionSignatures
-        const request = astraRequest({
-            method: 'POST',
-            url: `${agreement}://${getServer()}/api/broadcast/${classId}`,
-            headers: {
-                "Authorization": 'Basic ' + Buffer.from('ElectronClassSchedule:' + String(r)).toString('base64'),
-            }
-        })
-        try {
-            request.on('response', (response) => {
-                response.on('data', () => {})
-                response.on('end', () => {
-                    const { dialog } = require('electron');
-                    if (response.statusCode === 200) {
-                        dialog.showMessageBox(
-                            { type: 'info', title: '提示', message: '已下发成功', buttons: ['已阅'] }).then(doNothing)
-                    } else if (response.statusCode === 401) {
-                        dialog.showMessageBox({ type: 'error', title: '错误', message: '服务端返回 401，可能密码错误', buttons: ['已阅'] }).then(doNothing)
-                    } else {
-                        dialog.showMessageBox({ type: 'error', title: '错误', message: `服务端返回 ${response.statusCode}` , buttons: ['已阅'] }).then(doNothing)
-                    }
-                })
-            })
-        } catch (e) {
-            console.log(e)
-        }
-        request.on('error', (err) => console.error('Broadcast request error:', err))
-        request.end()
-    })
 })
 
 // 处理来自渲染进程的tray状态更新请求

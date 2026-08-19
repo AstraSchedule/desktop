@@ -15,7 +15,6 @@ const SEND_CHANNELS = new Set([
     'debugCalibrationData',
     'fromCloud',
     'setClass',
-    'RequestSyncConfig',
     'update-tray-status',
 ]);
 
@@ -46,7 +45,6 @@ const ON_CHANNELS = new Set([
     'setWeather',
     'debugInputChanged',
     'updateWeather',
-    'broadcastSyncConfig',
     'ws-status',
     'update-tray-status',
 ]);
