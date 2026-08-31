@@ -161,7 +161,6 @@ async function refreshCountdownWindow(reason = 'manual') {
         if (items.length === 0) {
             countdownState.latestItems = [];
             hideCountdownWindow(countdownState);
-            scheduleCountdownStartupRetry(`${reason}-empty`);
             console.log(`[Countdown] hidden by ${reason}: empty items from backend`);
             return;
         }
