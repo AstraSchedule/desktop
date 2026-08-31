@@ -84,7 +84,7 @@ function getServer() {
 
 // 统一 HTTP 请求，注入 User-Agent，不请求客户端证书（mTLS）
 function astraRequest(options) {
-    const https = require('https')
+    const https = require('node:https')
     const ua = `AstraSchedule/${app.getVersion()}`
     const url = typeof options === 'string' ? options : options.url
     const method = (typeof options === 'object' ? options.method : null) || 'GET'
