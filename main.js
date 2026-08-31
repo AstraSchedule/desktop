@@ -84,7 +84,7 @@ function getServer() {
 
 // 统一 HTTP 请求，注入 User-Agent，不请求客户端证书（mTLS）
 function astraRequest(options) {
-    const https = require('https')
+    const https = require('node:https')
     const ua = `AstraSchedule/${app.getVersion()}`
     const url = typeof options === 'string' ? options : options.url
     const method = (typeof options === 'object' ? options.method : null) || 'GET'
@@ -160,8 +160,8 @@ async function refreshCountdownWindow(reason = 'manual') {
         const items = Array.isArray(result?.items) ? result.items : [];
         if (items.length === 0) {
             countdownState.latestItems = [];
+            clearCountdownStartupRetryTimer()
             hideCountdownWindow(countdownState);
-            scheduleCountdownStartupRetry(`${reason}-empty`);
             console.log(`[Countdown] hidden by ${reason}: empty items from backend`);
             return;
         }
@@ -670,22 +670,10 @@ function getScheduleFromCloud() {
         response.on('end', () => {
             try {
                 const scheduleConfigSync = JSON.parse(raw)
-
-                // 过期响应保护：已有更新的请求在途，或返回版本低于本地已应用版本，
-                // 直接丢弃，不得更新 currentVersion / lastScheduleConfig / 倒数日缓存 / newConfig 推送
                 if (mySeq !== scheduleFetchSeq) {
                     console.warn('[Schedule] Discard stale response: superseded by a newer request')
                     return
                 }
-                if (scheduleConfigSync.version !== undefined) {
-                    const respVersion = Number.parseInt(scheduleConfigSync.version)
-                    if (!Number.isNaN(respVersion) && respVersion < currentVersion) {
-                        console.warn(`[Schedule] Discard stale response: version ${respVersion} < ${currentVersion}`)
-                        return
-                    }
-                }
-                console.log('Received schedule config from cloud:', scheduleConfigSync)
-
                 // 检查返回的 JSON 中是否含有 version 键
                 if (scheduleConfigSync.version !== undefined) {
                     const newVersion = Number.parseInt(scheduleConfigSync.version);
