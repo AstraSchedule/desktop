@@ -669,6 +669,10 @@ function getScheduleFromCloud() {
         response.on('end', () => {
             try {
                 const scheduleConfigSync = JSON.parse(raw)
+                if (mySeq !== scheduleFetchSeq) {
+                    console.warn('[Schedule] Discard stale response: superseded by a newer request')
+                    return
+                }
                 // 检查返回的 JSON 中是否含有 version 键
                 if (scheduleConfigSync.version !== undefined) {
                     const newVersion = Number.parseInt(scheduleConfigSync.version);
