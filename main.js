@@ -8,6 +8,76 @@ const startupFolderPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Microso
 const prompt = require('electron-prompt');
 const Store = require('electron-store');
 const store = new Store();
+
+// 安装器可在安装目录写入一次性初始化文件。仅打包应用读取，避免开发目录中的文件
+// 意外影响开发配置；导入成功后删除文件，后续运行完全依赖 electron-store。
+function getInstallConfigPath() {
+    if (!app.isPackaged || !process.execPath) return null;
+    return path.join(path.dirname(process.execPath), 'install-config.ini');
+}
+
+function parseInstallConfig(raw) {
+    const text = raw.includes('\u0000') ? raw.replace(/^\uFFFE/, '').replace(/^\uFEFF/, '') : raw.replace(/^\uFEFF/, '');
+    const result = {};
+    let section = '';
+    for (const line of text.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith(';') || trimmed.startsWith('#')) continue;
+        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+            section = trimmed.slice(1, -1).trim().toLowerCase();
+            continue;
+        }
+        if (section !== 'app') continue;
+        const separator = trimmed.indexOf('=');
+        if (separator < 1) continue;
+        const key = trimmed.slice(0, separator).trim();
+        const value = trimmed.slice(separator + 1).trim();
+        result[key] = value;
+    }
+    return result;
+}
+
+function parseInstallBoolean(value) {
+    if (value === '1' || value.toLowerCase() === 'true') return true;
+    if (value === '0' || value.toLowerCase() === 'false') return false;
+    return undefined;
+}
+
+function importInstallConfig() {
+    const configPath = getInstallConfigPath();
+    if (!configPath || !fs.existsSync(configPath)) return;
+
+    try {
+        const buffer = fs.readFileSync(configPath);
+        const raw = buffer.includes(0) ? buffer.toString('utf16le') : buffer.toString('utf8');
+        const config = parseInstallConfig(raw);
+        const stringKeys = ['server', 'class', 'local'];
+        const booleanKeys = ['isFromCloud', 'isSecureConnection', 'isAutoLaunch', 'isWindowAlwaysOnTop'];
+        let imported = false;
+
+        for (const key of stringKeys) {
+            if (typeof config[key] === 'string' && config[key].length > 0) {
+                store.set(key, config[key]);
+                imported = true;
+            }
+        }
+        for (const key of booleanKeys) {
+            if (typeof config[key] !== 'string') continue;
+            const value = parseInstallBoolean(config[key]);
+            if (value !== undefined) {
+                store.set(key, value);
+                imported = true;
+            }
+        }
+
+        // 只有配置成功解析并至少导入一个允许字段后才删除，避免损坏文件导致配置丢失。
+        if (imported) fs.unlinkSync(configPath);
+    } catch (error) {
+        console.error('[InstallConfig] import failed:', error?.message || error);
+    }
+}
+
+importInstallConfig();
 const {countdownState} = require('./main/countdown/state');
 const {registerCountdownIpc} = require('./main/countdown/ipc');
 const {processCountdownFromSchedule, pushCountdownItems} = require('./main/countdown/service');

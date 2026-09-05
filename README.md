@@ -32,6 +32,49 @@ _**本篇 README 从 [原项目](https://github.com/EnderWolf006/ElectronClassSc
 - 菜单中 `上课隐藏` 选项可控制课表本体、星期以及倒计时部分在上课时间是否显示
 - 若将 `课上计时` 与 `上课隐藏` 同时开启（推荐默认开启）可实现课上仅显示倒计时小窗口
 
+## 命令行安装
+
+Windows 安装器支持通过命令行预先设置安装目录、快捷方式、云端服务和应用运行选项，适合使用 BAT 批量部署。安装器会在安装目录生成一次性 `install-config.ini`，应用首次启动导入后自动删除；未传入应用参数的普通安装不会生成该文件。
+
+示例（参数值包含空格时使用双引号）：
+
+```bat
+AstraSchedule-Setup.exe /S /D=C:\AstraSchedule /SERVER=class.example.com /CLASS=39/2023/1 /LOCAL=北京市 /CLOUD=1 /SECURE=1 /AUTOLAUNCH=0 /TOPMOST=1 /DESKTOPSHORTCUT=0 /STARTMENUSHORTCUT=1 /LAUNCH=0
+```
+
+支持的参数：
+
+- `/S`：静默安装；`/D=路径`：指定安装目录（NSIS 标准参数）
+- `/SERVER=地址`：云端服务地址
+- `/CLASS=学校/年级/班级`：班级标识，例如 `39/2023/1`
+- `/LOCAL=地区`：天气查询地区
+- `/CLOUD=0|1`：是否连接云端
+- `/SECURE=0|1`：是否使用 HTTPS/WSS
+- `/AUTOLAUNCH=0|1`：是否开机启动
+- `/TOPMOST=0|1`：窗口是否置顶
+- `/DESKTOPSHORTCUT=0|1`：是否创建桌面快捷方式
+- `/STARTMENUSHORTCUT=0|1`：是否创建开始菜单快捷方式
+- `/LAUNCH=0|1`：安装后是否立即启动
+
+未传入的应用参数不会覆盖已有用户配置。`/DESKTOPSHORTCUT`、`/STARTMENUSHORTCUT` 和 `/LAUNCH` 默认值均为 `1`，与普通安装行为一致。
+
+### 一次性配置文件
+
+当命令行中包含 `/SERVER`、`/CLASS`、`/LOCAL`、`/CLOUD`、`/SECURE`、`/AUTOLAUNCH` 或 `/TOPMOST` 时，安装器会在目标安装目录写入 `install-config.ini`。该文件只用于首次启动导入配置；导入后的配置会持久化到 `electron-store`，后续运行不再依赖该文件：
+
+1. 安装器完成文件复制后生成配置文件。
+2. 应用启动时读取 `[app]` 节中的有效配置项并写入用户配置。
+3. 导入成功后自动删除 `install-config.ini`。
+
+如果应用尚未启动，配置文件会保留到下一次启动。配置文件删除失败不会阻止应用运行，后续启动会继续尝试清理。未传入上述应用参数时，安装器不会创建该文件。
+
+### BAT 部署建议
+
+- 推荐在 BAT 中使用完整路径调用安装器，并为包含空格或特殊字符的参数加双引号，例如 `/LOCAL="北京市 海淀区"`。
+- `/D=` 是 NSIS 的安装目录参数，通常应放在命令行末尾；安装器会按照 NSIS 规则处理该路径。
+- 批量部署时建议显式指定 `/LAUNCH=0`，避免安装过程结束后在部署机上启动应用。
+- 升级或重复安装时，仅本次命令行明确传入的应用参数会覆盖已有设置，未传入的参数保持原值。
+
 ## 版本号说明
 
 本项目使用 electron-updater 进行自动更新，版本号使用 `语义化版本控制` 格式，但由于本项目以一种近乎于滚动升级的方式发版，所以并不遵循其命名规范。本项目的版本号命名规则如下：
