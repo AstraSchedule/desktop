@@ -11,6 +11,68 @@ Var installStartMenuShortcut
 Var installLaunch
 Var installHasAppSettings
 
+Function trimInstallOptionValue
+  ; GetOptions 返回匹配项后面的剩余命令行；截断到下一个已知安装参数。
+  ; 因此值中的斜杠（例如 39/2023/1）不会被误认为参数边界。
+  StrLen $R2 $R1
+  StrCpy $R3 0
+trimInstallOptionValue_loop:
+  StrCpy $R4 $R1 1 $R3
+  StrCmp $R4 "" trimInstallOptionValue_done
+  StrCmp $R4 " " 0 trimInstallOptionValue_next
+  StrCpy $R4 $R1 9 $R3
+  StrCmp $R4 " /SERVER=" 0 +2
+    StrCpy $R1 $R1 $R3
+    Goto trimInstallOptionValue_done
+  StrCpy $R4 $R1 8 $R3
+  StrCmp $R4 " /CLASS=" 0 +2
+    StrCpy $R1 $R1 $R3
+    Goto trimInstallOptionValue_done
+  StrCpy $R4 $R1 7 $R3
+  StrCmp $R4 " /LOCAL=" 0 +2
+    StrCpy $R1 $R1 $R3
+    Goto trimInstallOptionValue_done
+  StrCpy $R4 $R1 7 $R3
+  StrCmp $R4 " /CLOUD=" 0 +2
+    StrCpy $R1 $R1 $R3
+    Goto trimInstallOptionValue_done
+  StrCpy $R4 $R1 8 $R3
+  StrCmp $R4 " /SECURE=" 0 +2
+    StrCpy $R1 $R1 $R3
+    Goto trimInstallOptionValue_done
+  StrCpy $R4 $R1 13 $R3
+  StrCmp $R4 " /AUTOLAUNCH=" 0 +2
+    StrCpy $R1 $R1 $R3
+    Goto trimInstallOptionValue_done
+  StrCpy $R4 $R1 9 $R3
+  StrCmp $R4 " /TOPMOST=" 0 +2
+    StrCpy $R1 $R1 $R3
+    Goto trimInstallOptionValue_done
+  StrCpy $R4 $R1 18 $R3
+  StrCmp $R4 " /DESKTOPSHORTCUT=" 0 +2
+    StrCpy $R1 $R1 $R3
+    Goto trimInstallOptionValue_done
+  StrCpy $R4 $R1 20 $R3
+  StrCmp $R4 " /STARTMENUSHORTCUT=" 0 +2
+    StrCpy $R1 $R1 $R3
+    Goto trimInstallOptionValue_done
+  StrCpy $R4 $R1 9 $R3
+  StrCmp $R4 " /LAUNCH=" 0 trimInstallOptionValue_next
+    StrCpy $R1 $R1 $R3
+    Goto trimInstallOptionValue_done
+trimInstallOptionValue_next:
+  IntOp $R3 $R3 + 1
+  Goto trimInstallOptionValue_loop
+trimInstallOptionValue_done:
+  ; 去除包住值的双引号。
+  StrCpy $R4 $R1 1
+  StrCmp $R4 '"' 0 +5
+    StrCpy $R1 $R1 '' 1
+    StrCpy $R4 $R1 1 -1
+    StrCmp $R4 '"' 0 +2
+      StrCpy $R1 $R1 -1
+FunctionEnd
+
 !macro customInit
   ; 确保在 Windows 7 上的兼容性
   ReadRegStr $0 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion" "ProductName"
@@ -37,51 +99,61 @@ Var installHasAppSettings
 
   ${GetOptions} $R0 "/SERVER=" $R1
   ${IfNot} ${Errors}
+    Call trimInstallOptionValue
     StrCpy $installServer $R1
     StrCpy $installHasAppSettings "1"
   ${EndIf}
   ${GetOptions} $R0 "/CLASS=" $R1
   ${IfNot} ${Errors}
+    Call trimInstallOptionValue
     StrCpy $installClass $R1
     StrCpy $installHasAppSettings "1"
   ${EndIf}
   ${GetOptions} $R0 "/LOCAL=" $R1
   ${IfNot} ${Errors}
+    Call trimInstallOptionValue
     StrCpy $installLocal $R1
     StrCpy $installHasAppSettings "1"
   ${EndIf}
 
   ${GetOptions} $R0 "/CLOUD=" $R1
   ${IfNot} ${Errors}
+    Call trimInstallOptionValue
     StrCpy $installCloud $R1
     StrCpy $installHasAppSettings "1"
   ${EndIf}
   ${GetOptions} $R0 "/SECURE=" $R1
   ${IfNot} ${Errors}
+    Call trimInstallOptionValue
     StrCpy $installSecure $R1
     StrCpy $installHasAppSettings "1"
   ${EndIf}
   ${GetOptions} $R0 "/AUTOLAUNCH=" $R1
   ${IfNot} ${Errors}
+    Call trimInstallOptionValue
     StrCpy $installAutoLaunch $R1
     StrCpy $installHasAppSettings "1"
   ${EndIf}
   ${GetOptions} $R0 "/TOPMOST=" $R1
   ${IfNot} ${Errors}
+    Call trimInstallOptionValue
     StrCpy $installTopmost $R1
     StrCpy $installHasAppSettings "1"
   ${EndIf}
 
   ${GetOptions} $R0 "/DESKTOPSHORTCUT=" $R1
   ${IfNot} ${Errors}
+    Call trimInstallOptionValue
     StrCpy $installDesktopShortcut $R1
   ${EndIf}
   ${GetOptions} $R0 "/STARTMENUSHORTCUT=" $R1
   ${IfNot} ${Errors}
+    Call trimInstallOptionValue
     StrCpy $installStartMenuShortcut $R1
   ${EndIf}
   ${GetOptions} $R0 "/LAUNCH=" $R1
   ${IfNot} ${Errors}
+    Call trimInstallOptionValue
     StrCpy $installLaunch $R1
   ${EndIf}
 !macroend

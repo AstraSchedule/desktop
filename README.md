@@ -39,14 +39,14 @@ Windows 安装器支持通过命令行预先设置安装目录、快捷方式、
 示例（参数值包含空格时使用双引号）：
 
 ```bat
-AstraSchedule-Setup.exe /S /D=C:\AstraSchedule /SERVER=class.example.com /CLASS=39/2023/1 /LOCAL=北京市 /CLOUD=1 /SECURE=1 /AUTOLAUNCH=0 /TOPMOST=1 /DESKTOPSHORTCUT=0 /STARTMENUSHORTCUT=1 /LAUNCH=0
+AstraSchedule-Setup.exe /S /D=C:\AstraSchedule /SERVER=class.example.com /CLASS="39/2023/1" /LOCAL=南京 /CLOUD=1 /SECURE=1 /AUTOLAUNCH=0 /TOPMOST=1 /DESKTOPSHORTCUT=0 /STARTMENUSHORTCUT=1 /LAUNCH=0
 ```
 
 支持的参数：
 
 - `/S`：静默安装；`/D=路径`：指定安装目录（NSIS 标准参数）
 - `/SERVER=地址`：云端服务地址
-- `/CLASS=学校/年级/班级`：班级标识，例如 `39/2023/1`
+- `/CLASS="学校/年级/班级"`：班级标识，例如 `/CLASS="39/2023/1"`；包含 `/` 的值建议使用双引号
 - `/LOCAL=地区`：天气查询地区
 - `/CLOUD=0|1`：是否连接云端
 - `/SECURE=0|1`：是否使用 HTTPS/WSS
@@ -70,7 +70,7 @@ AstraSchedule-Setup.exe /S /D=C:\AstraSchedule /SERVER=class.example.com /CLASS=
 
 ### BAT 部署建议
 
-- 推荐在 BAT 中使用完整路径调用安装器，并为包含空格或特殊字符的参数加双引号，例如 `/LOCAL="北京市 海淀区"`。
+- 推荐在 BAT 中使用完整路径调用安装器，并为包含 `/`、空格或特殊字符的参数加双引号，例如 `/CLASS="39/2023/1"`、`/LOCAL="北京/海淀"`。安装器也会正确处理不带引号的班级路径值。
 - `/D=` 是 NSIS 的安装目录参数，通常应放在命令行末尾；安装器会按照 NSIS 规则处理该路径。
 - 批量部署时建议显式指定 `/LAUNCH=0`，避免安装过程结束后在部署机上启动应用。
 - 升级或重复安装时，仅本次命令行明确传入的应用参数会覆盖已有设置，未传入的参数保持原值。
