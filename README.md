@@ -39,15 +39,16 @@ Windows 安装器支持通过命令行预先设置安装目录、快捷方式、
 示例（参数值包含空格时使用双引号）：
 
 ```bat
-AstraSchedule-Setup.exe /S /SERVER=class.example.com /CLASS="39/2023/1" /LOCAL=南京 /CLOUD=1 /SECURE=1 /AUTOLAUNCH=0 /TOPMOST=1 /DESKTOPSHORTCUT=0 /STARTMENUSHORTCUT=1 /LAUNCH=0 /D=C:\AstraSchedule
+AstraSchedule-Setup.exe /S /SERVER=class.example.com /SCHOOL=39 /GRADE=2023 /CLASS=1 /LOCALP=Nanjing /LOCALC=Qinhuai /CLOUD=1 /SECURE=1 /AUTOLAUNCH=0 /TOPMOST=1 /DESKTOPSHORTCUT=0 /STARTMENUSHORTCUT=1 /LAUNCH=0 /D=C:\AstraSchedule
 ```
 
 支持的参数：
 
 - `/S`：静默安装；`/D=路径`：指定安装目录（NSIS 标准参数）
 - `/SERVER=地址`：云端服务地址
-- `/CLASS="学校/年级/班级"`：班级标识，例如 `/CLASS="39/2023/1"`；包含 `/` 的值建议使用双引号
-- `/LOCAL=地区`：天气查询地区
+- `/SCHOOL=学校`、`/GRADE=年级`、`/CLASS=班级`：分别设置班级标识的三个部分，非空部分按顺序用 `/` 拼接；例如 `39`、`2023`、`1` 会生成 `39/2023/1`
+- `/LOCALP=省份`、`/LOCALC=城市或地区`：分别设置天气地区的两个部分，两个都填写时用 `/` 拼接，只填写一个时直接使用该值
+- `/LOCAL=地区`：旧版完整地区参数，未使用 `/LOCALP` 或 `/LOCALC` 时仍可用
 - `/CLOUD=0|1`：是否连接云端
 - `/SECURE=0|1`：是否使用 HTTPS/WSS
 - `/AUTOLAUNCH=0|1`：是否开机启动
@@ -60,7 +61,7 @@ AstraSchedule-Setup.exe /S /SERVER=class.example.com /CLASS="39/2023/1" /LOCAL=�
 
 ### 一次性配置文件
 
-当命令行中包含 `/SERVER`、`/CLASS`、`/LOCAL`、`/CLOUD`、`/SECURE`、`/AUTOLAUNCH` 或 `/TOPMOST` 时，安装器会在目标安装目录写入 `install-config.ini`。该文件只用于首次启动导入配置；导入后的配置会持久化到 `electron-store`，后续运行不再依赖该文件：
+当命令行中包含 `/SERVER`、`/SCHOOL`、`/GRADE`、`/CLASS`、`/LOCALP`、`/LOCALC`、`/LOCAL`、`/CLOUD`、`/SECURE`、`/AUTOLAUNCH` 或 `/TOPMOST` 时，安装器会在目标安装目录写入 `install-config.ini`。该文件只用于首次启动导入配置；导入后的配置会持久化到 `electron-store`，后续运行不再依赖该文件：
 
 1. 安装器完成文件复制后生成配置文件。
 2. 应用启动时读取 `[app]` 节中的有效配置项并写入用户配置。
@@ -70,7 +71,7 @@ AstraSchedule-Setup.exe /S /SERVER=class.example.com /CLASS="39/2023/1" /LOCAL=�
 
 ### BAT 部署建议
 
-- 推荐在 BAT 中使用完整路径调用安装器，并为包含 `/`、空格或特殊字符的参数加双引号，例如 `/CLASS="39/2023/1"`、`/LOCAL="北京/海淀"`。安装器也会正确处理不带引号的班级路径值。
+- 推荐在 BAT 中使用完整路径调用安装器，并为包含空格或特殊字符的参数加双引号；班级和地区建议使用拆分参数，避免在单个参数值中手写 `/`。
 - `/D=` 是 NSIS 的安装目录参数，通常应放在命令行末尾；安装器会按照 NSIS 规则处理该路径。
 - 批量部署时建议显式指定 `/LAUNCH=0`，避免安装过程结束后在部署机上启动应用。
 - 升级或重复安装时，仅本次命令行明确传入的应用参数会覆盖已有设置，未传入的参数保持原值。
