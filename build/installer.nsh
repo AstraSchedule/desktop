@@ -24,6 +24,10 @@ trimInstallOptionValue_loop:
   StrCpy $R4 $R1 1 $R3
   StrCmp $R4 "" trimInstallOptionValue_done
   StrCmp $R4 " " 0 trimInstallOptionValue_next
+  StrCpy $R4 $R1 4 $R3
+  StrCmp $R4 " /D=" 0 +2
+    StrCpy $R1 $R1 $R3
+    Goto trimInstallOptionValue_done
   StrCpy $R4 $R1 9 $R3
   StrCmp $R4 " /SCHOOL=" 0 +2
     StrCpy $R1 $R1 $R3
