@@ -39,7 +39,7 @@ Windows 安装器支持通过命令行预先设置安装目录、快捷方式、
 示例（参数值包含空格时使用双引号）：
 
 ```bat
-AstraSchedule-Setup.exe /S /D=C:\AstraSchedule /SERVER=class.example.com /CLASS="39/2023/1" /LOCAL=南京 /CLOUD=1 /SECURE=1 /AUTOLAUNCH=0 /TOPMOST=1 /DESKTOPSHORTCUT=0 /STARTMENUSHORTCUT=1 /LAUNCH=0
+AstraSchedule-Setup.exe /S /SERVER=class.example.com /CLASS="39/2023/1" /LOCAL=南京 /CLOUD=1 /SECURE=1 /AUTOLAUNCH=0 /TOPMOST=1 /DESKTOPSHORTCUT=0 /STARTMENUSHORTCUT=1 /LAUNCH=0 /D=C:\AstraSchedule
 ```
 
 支持的参数：

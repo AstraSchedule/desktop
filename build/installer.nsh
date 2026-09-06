@@ -28,15 +28,15 @@ trimInstallOptionValue_loop:
   StrCmp $R4 " /CLASS=" 0 +2
     StrCpy $R1 $R1 $R3
     Goto trimInstallOptionValue_done
-  StrCpy $R4 $R1 7 $R3
+  StrCpy $R4 $R1 8 $R3
   StrCmp $R4 " /LOCAL=" 0 +2
     StrCpy $R1 $R1 $R3
     Goto trimInstallOptionValue_done
-  StrCpy $R4 $R1 7 $R3
+  StrCpy $R4 $R1 8 $R3
   StrCmp $R4 " /CLOUD=" 0 +2
     StrCpy $R1 $R1 $R3
     Goto trimInstallOptionValue_done
-  StrCpy $R4 $R1 8 $R3
+  StrCpy $R4 $R1 9 $R3
   StrCmp $R4 " /SECURE=" 0 +2
     StrCpy $R1 $R1 $R3
     Goto trimInstallOptionValue_done
@@ -44,7 +44,7 @@ trimInstallOptionValue_loop:
   StrCmp $R4 " /AUTOLAUNCH=" 0 +2
     StrCpy $R1 $R1 $R3
     Goto trimInstallOptionValue_done
-  StrCpy $R4 $R1 9 $R3
+  StrCpy $R4 $R1 10 $R3
   StrCmp $R4 " /TOPMOST=" 0 +2
     StrCpy $R1 $R1 $R3
     Goto trimInstallOptionValue_done
