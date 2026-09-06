@@ -67,6 +67,30 @@ jobs:
             Write-Host "No NSIS installer found"
           }
 
+      - name: Upload dist to OSS
+        shell: pwsh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.OSS_SECRET_KEY }}
+          AWS_DEFAULT_REGION: cn-east-1
+        run: |
+          $ver = (Get-Content package.json -Raw | ConvertFrom-Json).version
+
+          Write-Host "Uploading version: $ver"
+
+          aws s3 sync `
+            "dist" `
+            "s3://yanmo-objects/AstraSchedule/$ver/" `
+            --endpoint-url "https://cn-nb1.rains3.com" `
+            --no-progress
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "OSS upload failed."
+            exit $LASTEXITCODE
+          }
+
+          Write-Host "OSS upload completed: AstraSchedule/$ver/"
+
       - name: Upload dist as artifact
         uses: actions/upload-artifact@v4
         with:
