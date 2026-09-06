@@ -1,7 +1,11 @@
 !ifndef BUILD_UNINSTALLER
 Var installServer
+Var installSchool
+Var installGrade
 Var installClass
-Var installLocal
+Var installLocalProvince
+Var installLocalCity
+Var installLegacyLocal
 Var installCloud
 Var installSecure
 Var installAutoLaunch
@@ -20,12 +24,32 @@ trimInstallOptionValue_loop:
   StrCpy $R4 $R1 1 $R3
   StrCmp $R4 "" trimInstallOptionValue_done
   StrCmp $R4 " " 0 trimInstallOptionValue_next
+  StrCpy $R4 $R1 4 $R3
+  StrCmp $R4 " /D=" 0 +2
+    StrCpy $R1 $R1 $R3
+    Goto trimInstallOptionValue_done
+  StrCpy $R4 $R1 9 $R3
+  StrCmp $R4 " /SCHOOL=" 0 +2
+    StrCpy $R1 $R1 $R3
+    Goto trimInstallOptionValue_done
+  StrCpy $R4 $R1 8 $R3
+  StrCmp $R4 " /GRADE=" 0 +2
+    StrCpy $R1 $R1 $R3
+    Goto trimInstallOptionValue_done
   StrCpy $R4 $R1 9 $R3
   StrCmp $R4 " /SERVER=" 0 +2
     StrCpy $R1 $R1 $R3
     Goto trimInstallOptionValue_done
   StrCpy $R4 $R1 8 $R3
   StrCmp $R4 " /CLASS=" 0 +2
+    StrCpy $R1 $R1 $R3
+    Goto trimInstallOptionValue_done
+  StrCpy $R4 $R1 9 $R3
+  StrCmp $R4 " /LOCALP=" 0 +2
+    StrCpy $R1 $R1 $R3
+    Goto trimInstallOptionValue_done
+  StrCpy $R4 $R1 9 $R3
+  StrCmp $R4 " /LOCALC=" 0 +2
     StrCpy $R1 $R1 $R3
     Goto trimInstallOptionValue_done
   StrCpy $R4 $R1 8 $R3
@@ -97,6 +121,18 @@ FunctionEnd
   StrCpy $installLaunch "1"
   ${GetParameters} $R0
 
+  ${GetOptions} $R0 "/SCHOOL=" $R1
+  ${IfNot} ${Errors}
+    Call trimInstallOptionValue
+    StrCpy $installSchool $R1
+    StrCpy $installHasAppSettings "1"
+  ${EndIf}
+  ${GetOptions} $R0 "/GRADE=" $R1
+  ${IfNot} ${Errors}
+    Call trimInstallOptionValue
+    StrCpy $installGrade $R1
+    StrCpy $installHasAppSettings "1"
+  ${EndIf}
   ${GetOptions} $R0 "/SERVER=" $R1
   ${IfNot} ${Errors}
     Call trimInstallOptionValue
@@ -109,10 +145,22 @@ FunctionEnd
     StrCpy $installClass $R1
     StrCpy $installHasAppSettings "1"
   ${EndIf}
+  ${GetOptions} $R0 "/LOCALP=" $R1
+  ${IfNot} ${Errors}
+    Call trimInstallOptionValue
+    StrCpy $installLocalProvince $R1
+    StrCpy $installHasAppSettings "1"
+  ${EndIf}
+  ${GetOptions} $R0 "/LOCALC=" $R1
+  ${IfNot} ${Errors}
+    Call trimInstallOptionValue
+    StrCpy $installLocalCity $R1
+    StrCpy $installHasAppSettings "1"
+  ${EndIf}
   ${GetOptions} $R0 "/LOCAL=" $R1
   ${IfNot} ${Errors}
     Call trimInstallOptionValue
-    StrCpy $installLocal $R1
+    StrCpy $installLegacyLocal $R1
     StrCpy $installHasAppSettings "1"
   ${EndIf}
 
@@ -174,11 +222,46 @@ FunctionEnd
     ${If} $installServer != ""
       FileWrite $0 "server=$installServer$\r$\n"
     ${EndIf}
-    ${If} $installClass != ""
-      FileWrite $0 "class=$installClass$\r$\n"
+    ; 新参数按学校/年级/班级顺序拼接；只填写其中一部分时不添加多余斜杠。
+    StrCpy $R5 ""
+    ${If} $installSchool != ""
+      StrCpy $R5 $installSchool
     ${EndIf}
-    ${If} $installLocal != ""
-      FileWrite $0 "local=$installLocal$\r$\n"
+    ${If} $installGrade != ""
+      ${If} $R5 != ""
+        StrCpy $R5 "$R5/$installGrade"
+      ${Else}
+        StrCpy $R5 $installGrade
+      ${EndIf}
+    ${EndIf}
+    ${If} $installClass != ""
+      ${If} $R5 != ""
+        StrCpy $R5 "$R5/$installClass"
+      ${Else}
+        StrCpy $R5 $installClass
+      ${EndIf}
+    ${EndIf}
+    ${If} $R5 != ""
+      FileWrite $0 "class=$R5$\r$\n"
+    ${EndIf}
+
+    ; 新参数按省/市（或地区）顺序拼接；只填写其中一部分时直接使用该值。
+    StrCpy $R5 ""
+    ${If} $installLocalProvince != ""
+      StrCpy $R5 $installLocalProvince
+    ${EndIf}
+    ${If} $installLocalCity != ""
+      ${If} $R5 != ""
+        StrCpy $R5 "$R5/$installLocalCity"
+      ${Else}
+        StrCpy $R5 $installLocalCity
+      ${EndIf}
+    ${EndIf}
+    ${If} $R5 == ""
+      StrCpy $R5 $installLegacyLocal
+    ${EndIf}
+    ${If} $R5 != ""
+      FileWrite $0 "local=$R5$\r$\n"
     ${EndIf}
     ${If} $installCloud == "0"
       FileWrite $0 "isFromCloud=false$\r$\n"
