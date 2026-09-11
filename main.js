@@ -31,8 +31,7 @@ function parseInstallConfig(raw) {
         const separator = trimmed.indexOf('=');
         if (separator < 1) continue;
         const key = trimmed.slice(0, separator).trim();
-        const value = trimmed.slice(separator + 1).trim();
-        result[key] = value;
+        result[key] = trimmed.slice(separator + 1).trim();
     }
     return result;
 }
@@ -82,6 +81,10 @@ const {countdownState} = require('./main/countdown/state');
 const {registerCountdownIpc} = require('./main/countdown/ipc');
 const {processCountdownFromSchedule, pushCountdownItems} = require('./main/countdown/service');
 const {showCountdownWindow, hideCountdownWindow} = require('./main/countdown/window');
+const { OfflineCache } = require('./main/offline-cache');
+
+// 初始化离线缓存
+const offlineCache = new OfflineCache();
 
 
 
@@ -686,8 +689,22 @@ async function getScheduleFromCloudWithRetry(maxRetries = 10) {
         }
     }
     console.error('[Network] Failed to establish network connection after', maxRetries, 'attempts')
-    // 即使网络连接失败，也继续尝试获取课表（可能在移动网络等不稳定情况下）
-    console.log('[Network] Proceeding with schedule fetch despite network check failure')
+
+    // 尝试从本地缓存加载课表数据（离线模式）
+    if (offlineCache.hasCachedData()) {
+        console.log('[Network] Loading schedule from local cache (offline mode)')
+        const cachedData = offlineCache.loadFromCache()
+        if (cachedData?.data) {
+            offlineCache.setOfflineStatus(true)
+            if (win && !win.isDestroyed()) win.webContents.send('newConfig', cachedData.data)
+            lastScheduleConfig = cachedData.data
+            console.log('[Network] Successfully loaded schedule from cache')
+            return false
+        }
+    }
+
+    // 即使没有缓存数据，也继续尝试获取课表（可能在移动网络等不稳定情况下）
+    console.log('[Network] No cached data available, proceeding with schedule fetch despite network check failure')
     getScheduleFromCloud()
     return false
 }
@@ -723,6 +740,7 @@ function getScheduleFromCloud() {
 
         if (statusCode < 200 || statusCode >= 300) {
             console.error('getScheduleFromCloud request failed with status:', statusCode);
+            offlineCache.setOfflineStatus(true)
             // 仅最新请求允许安排重试；被替代的请求不得发起后续请求（调度时与执行时双重校验）
             if (mySeq === scheduleFetchSeq) {
                 setTimeout(() => {
@@ -784,6 +802,10 @@ function getScheduleFromCloud() {
                 if (win && !win.isDestroyed()) win.webContents.send('newConfig', scheduleConfigSync)
                 lastScheduleConfig = scheduleConfigSync
 
+                // 保存到本地缓存（离线模式支持）
+                offlineCache.saveToCache(scheduleConfigSync, scheduleConfigSync.version || currentVersion)
+                offlineCache.setOfflineStatus(false)
+
                 // 根据 startup_behavior 决定窗口行为
                 if (isFromCloud) {
                     const startupBehavior = scheduleConfigSync.startup_behavior || 'normal'
@@ -811,6 +833,7 @@ function getScheduleFromCloud() {
     })
     request.on('error', (err) => {
         console.error('getScheduleFromCloud request error:', err)
+        offlineCache.setOfflineStatus(true)
         // 不显示错误弹窗，仅记录错误
         // 仅最新请求允许重试，且回调执行前再次校验，被替代的请求不得发起后续请求
         if (mySeq === scheduleFetchSeq) {
@@ -868,6 +891,17 @@ app.on('before-quit', () => {
 // 仅提供读取用户配置的 IPC
 ipcMain.handle('readUserConfig', () => readUserConfigSafe())
 ipcMain.handle('getUserConfigPath', () => getUserConfigPath())
+
+// 离线模式相关 IPC
+ipcMain.handle('getOfflineStatus', () => offlineCache.getOfflineStatus())
+ipcMain.handle('getCachedVersions', () => offlineCache.getCachedVersions())
+ipcMain.handle('getCacheStats', () => offlineCache.getCacheStats())
+ipcMain.handle('loadCachedSchedule', (e, version) => {
+    const cachedData = offlineCache.loadFromCache(version)
+    if (cachedData?.data) {
+        return cachedData?.data || null
+    }
+})
 
 ipcMain.on('getWeekIndex', (e, arg) => {
     // 销毁旧的 Tray 实例，避免重复创建和状态丢失

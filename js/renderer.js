@@ -1036,6 +1036,8 @@ ipcRenderer.on('updateWeather', () => {
 
 
 let wsConnected = true; // 默认为连接状态
+let isOfflineMode = false; // 离线模式状态
+let offlineIndicator = null; // 离线指示器DOM元素
 
 
 
@@ -1211,4 +1213,79 @@ function setBanner() {
     } else {
         hideBanner()
     }
+}
+
+// 离线模式相关函数
+async function checkOfflineStatus() {
+    try {
+        const status = await ipcRenderer.invoke('getOfflineStatus');
+        updateOfflineIndicator(status.isOffline);
+        return status;
+    } catch (error) {
+        console.error('[Renderer] Failed to get offline status:', error);
+        return null;
+    }
+}
+
+function updateOfflineIndicator(isOffline) {
+    if (isOffline === isOfflineMode) return;
+    
+    isOfflineMode = isOffline;
+    console.log('[Renderer] Offline mode changed:', isOfflineMode);
+    
+    // 创建或更新离线指示器
+    if (!offlineIndicator) {
+        offlineIndicator = document.createElement('div');
+        offlineIndicator.id = 'offlineIndicator';
+        offlineIndicator.style.cssText = `
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(255, 165, 0, 0.8);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 1000;
+            display: none;
+        `;
+        document.body.appendChild(offlineIndicator);
+    }
+    
+    if (isOfflineMode) {
+        offlineIndicator.textContent = '离线模式';
+        offlineIndicator.style.display = 'block';
+    } else {
+        offlineIndicator.style.display = 'none';
+    }
+}
+
+// 定期检查离线状态
+let offlineCheckInterval = null;
+function startOfflineStatusCheck() {
+    if (offlineCheckInterval) {
+        clearInterval(offlineCheckInterval);
+    }
+    
+    offlineCheckInterval = setInterval(async () => {
+        await checkOfflineStatus();
+    }, 30000); // 每30秒检查一次
+}
+
+// 停止离线状态检查
+function stopOfflineStatusCheck() {
+    if (offlineCheckInterval) {
+        clearInterval(offlineCheckInterval);
+        offlineCheckInterval = null;
+    }
+}
+
+// 在初始化时启动离线状态检查
+if (typeof initDomAndStart === 'function') {
+    const originalInitDomAndStart = initDomAndStart;
+    initDomAndStart = async function() {
+        await originalInitDomAndStart();
+        await checkOfflineStatus();
+        startOfflineStatusCheck();
+    };
 }

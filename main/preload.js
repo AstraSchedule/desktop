@@ -21,6 +21,10 @@ const SEND_CHANNELS = new Set([
 const INVOKE_CHANNELS = new Set([
     'readUserConfig',
     'getCursorAndBounds',
+    'getOfflineStatus',
+    'getCachedVersions',
+    'getCacheStats',
+    'loadCachedSchedule',
 ]);
 
 const ON_CHANNELS = new Set([
