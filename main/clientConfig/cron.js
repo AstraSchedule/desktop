@@ -14,6 +14,14 @@ const FIELD_RANGES = [
 
 const MAX_SEARCH_DAYS = 366
 
+// 严格十进制解析：parseInt 会接受 "5x" 这类带尾随字符的输入，导致非法表达式被静默当作合法值
+const INT_RE = /^\d+$/
+
+function toInt(raw) {
+    if (!INT_RE.test(raw)) return null
+    return Number.parseInt(raw, 10)
+}
+
 function parseField(raw, min, max) {
     const field = { any: false, values: new Set() }
     if (raw === '*') {
@@ -26,20 +34,22 @@ function parseField(raw, min, max) {
         let body = part
         const slash = part.indexOf('/')
         if (slash >= 0) {
-            step = Number.parseInt(part.slice(slash + 1), 10)
-            if (!Number.isInteger(step) || step <= 0) return null
+            const parsedStep = toInt(part.slice(slash + 1))
+            if (parsedStep === null || parsedStep <= 0) return null
+            step = parsedStep
             body = part.slice(0, slash)
         }
         let lo = min
         let hi = max
         if (body !== '*') {
             const bounds = body.split('-')
-            lo = Number.parseInt(bounds[0], 10)
-            if (!Number.isInteger(lo)) return null
+            if (bounds.length > 2) return null
+            lo = toInt(bounds[0])
+            if (lo === null) return null
             hi = lo
             if (bounds.length === 2) {
-                hi = Number.parseInt(bounds[1], 10)
-                if (!Number.isInteger(hi)) return null
+                hi = toInt(bounds[1])
+                if (hi === null) return null
             }
         }
         if (lo < min || hi > max || lo > hi) return null

@@ -94,15 +94,20 @@ function recompute(force) {
     const winners = resolveSettings(ctx)
     for (const key of SETTING_KEYS) {
         const winner = winners[key]
-        controlled[key] = !!winner
+        const wasControlled = !!controlled[key]
+        const nowControlled = !!winner
         const value = winner ? winner.value : deps.getLocalSetting(key, DEFAULT_SETTINGS[key])
-        if (!force && applied[key] === value) continue
-        applied[key] = value
+        // 值没变但「是否被规则接管」变了也要重新下发：托盘勾选/置灰依赖 fromRule
+        if (!force && applied[key] === value && wasControlled === nowControlled) continue
         try {
-            deps.applySetting(key, value, !!winner)
+            deps.applySetting(key, value, nowControlled)
         } catch (e) {
+            // 应用失败时不记录状态，下个 tick 会重试（避免状态与窗口实际不一致）
             console.error('[ClientConfig] 应用配置失败:', key, e)
+            continue
         }
+        controlled[key] = nowControlled
+        applied[key] = value
     }
 }
 

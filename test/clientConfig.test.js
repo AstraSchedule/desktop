@@ -38,6 +38,16 @@ test('parseCron 接受合法表达式、拒绝非法表达式', () => {
     }
 })
 
+test('parseCron 拒绝带尾随字符与多余分段的字段', () => {
+    for (const expr of ['5x * * * *', '1-2-3 * * * *', '5/2/3 * * * *', '1- * * * *', 'x-y * * * *']) {
+        assert.equal(cron.parseCron(expr), null, expr)
+    }
+    // 合法边界仍应通过
+    assert.ok(cron.parseCron('5 * * * *'))
+    assert.ok(cron.parseCron('5-10 * * * *'))
+    assert.ok(cron.parseCron('5-10/2 * * * *'))
+})
+
 test('cron prev/next 命中时刻', () => {
     const spec = cron.parseCron('0 8 * * 1')
     // 2026-09-02 是周三，上一次命中为 08-31 周一，下一次为 09-07 周一
@@ -218,6 +228,56 @@ test('调度器：每周轮换规则在不同周取不同配置', () => {
     const last = lastAppliedOf(applied, 'isDuringClassHidden')
     assert.ok(last !== null)
     assert.ok(typeof last.value === 'boolean')
+})
+
+test('调度器：规则退出后即使取值不变也要重新下发（托盘置灰状态跟随）', () => {
+    const applied = []
+    scheduler.init({
+        getLocalSetting: (key, fallback) => (key === 'isAlwaysMinimized' ? true : fallback),
+        applySetting: (key, value, fromRule) => applied.push({ key, value, fromRule })
+    })
+
+    const rule = {
+        taskId: 'same-value', priority: 1, specificity: 1,
+        when: { kind: 'range', startDate: '2000-01-01', endDate: '2099-12-31' },
+        settings: { isAlwaysMinimized: true }
+    }
+    scheduler.updateFromSchedule({ client_config_rules: [rule] })
+    assert.equal(lastAppliedOf(applied, 'isAlwaysMinimized').fromRule, true, '规则生效时标记为受管')
+    assert.equal(scheduler.isControlled('isAlwaysMinimized'), true)
+
+    // 规则被移除后取值仍是 true（本地也是 true），但受管状态必须重新下发为 false
+    scheduler.updateFromSchedule({ client_config_rules: [] })
+    const last = lastAppliedOf(applied, 'isAlwaysMinimized')
+    assert.equal(last.value, true)
+    assert.equal(last.fromRule, false, '规则退出后必须重新下发，否则托盘保持置灰')
+    assert.equal(scheduler.isControlled('isAlwaysMinimized'), false)
+})
+
+test('调度器：applySetting 抛错时不记录状态，下次重算仍会重试', () => {
+    let failing = true
+    const calls = []
+    scheduler.init({
+        getLocalSetting: (key, fallback) => fallback,
+        applySetting: (key, value, fromRule) => {
+            calls.push({ key, value, fromRule })
+            if (failing && key === 'isDuringClassHidden') throw new Error('webContents destroyed')
+        }
+    })
+
+    scheduler.updateFromSchedule({ client_config_rules: [
+        { taskId: 'r', priority: 1, when: { kind: 'range', startDate: '2000-01-01', endDate: '2099-12-31' }, settings: { isDuringClassHidden: false } }
+    ] })
+    const failedCalls = calls.filter(c => c.key === 'isDuringClassHidden')
+    assert.equal(failedCalls.length, 1)
+    assert.equal(scheduler.isControlled('isDuringClassHidden'), false, '失败时不应记录为已接管')
+
+    failing = false
+    scheduler.recompute()
+    const retriedCalls = calls.filter(c => c.key === 'isDuringClassHidden')
+    assert.equal(retriedCalls.length, 2, '下一次重算必须重试')
+    assert.equal(retriedCalls[1].value, false)
+    assert.equal(scheduler.isControlled('isDuringClassHidden'), true)
 })
 
 test('调度器：空规则集不报错', () => {
