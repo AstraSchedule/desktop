@@ -64,6 +64,14 @@ test('cron prev 在命中小时之前也能找到当天更早的命中', () => {
     assert.equal(prev.getTime(), day(2026, 9, 1, 8).getTime())
 })
 
+test('cron next 不会漏掉当前小时内更晚的命中', () => {
+    // 每小时的 0 分与 30 分命中：08:15 的下一次必须是 08:30，而不是被跳过后的 09:00
+    const spec = cron.parseCron('0,30 * * * *')
+    const next = cron.next(spec, new Date(2026, 8, 1, 8, 15, 0))
+    assert.equal(next.getTime(), new Date(2026, 8, 1, 8, 30, 0).getTime())
+    assert.equal(cron.matches(spec, next), true)
+})
+
 test('cron 稀疏表达式（2 月 29 日）在 8 年窗口内也能找到前后命中', () => {
     const spec = cron.parseCron('0 0 29 2 *')
     // 2100 不是闰年：2096-02-29 的下一次是 2104-02-29，间隔 8 年（远超 366 天）

@@ -127,8 +127,9 @@ function lastMatchingMinute(field, maxMinute) {
 }
 
 // firstMatchingMinute 在 [0, 59] 内从小到大找第一个命中的分钟，找不到返回 null
-function firstMatchingMinute(field) {
-    for (let minute = 0; minute <= 59; minute++) {
+// minMinute 用于「同一小时内必须严格晚于 limit」的场景，避免跳过本小时内更晚的命中
+function firstMatchingMinute(field, minMinute = 0) {
+    for (let minute = minMinute; minute <= 59; minute++) {
         if (fieldMatch(field, minute)) return minute
     }
     return null
@@ -151,9 +152,12 @@ function lastHitOfDay(spec, day, limit) {
 
 // firstHitOfDay 找出该日严格晚于 limit 的第一次命中；strictlyAfterDay 为真时整天都算
 function firstHitOfDay(spec, day, limit, strictlyAfterDay) {
+    const onLimitDay = !strictlyAfterDay && sameDay(day, limit)
     for (let hour = 0; hour <= 23; hour++) {
         if (!fieldMatch(spec.hour, hour)) continue
-        const minute = firstMatchingMinute(spec.minute)
+        // 与 limit 同一小时时必须从 limit 的下一分钟开始找，否则 08:15 会跳过 08:30 直接取 09:00
+        const minMinute = onLimitDay && hour === limit.getHours() ? limit.getMinutes() + 1 : 0
+        const minute = firstMatchingMinute(spec.minute, minMinute)
         if (minute === null) continue
         const candidate = atMinute(day, hour, minute)
         if (strictlyAfterDay || candidate.getTime() > limit.getTime()) return candidate
