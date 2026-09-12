@@ -8,6 +8,7 @@ const startupFolderPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Microso
 const prompt = require('electron-prompt');
 const Store = require('electron-store');
 const store = new Store();
+const clientConfig = require('./main/clientConfig');
 
 // 安装器可在安装目录写入一次性初始化文件。仅打包应用读取，避免开发目录中的文件
 // 意外影响开发配置；导入成功后删除文件，后续运行完全依赖 electron-store。
@@ -104,6 +105,43 @@ let win;
 let template = []
 // 统一资源路径解析，兼容 asar
 const asset = (...p) => path.join(__dirname, ...p)
+
+// ============================================================
+// 自动客户端配置：把服务端下发的客户端配置规则应用到窗口与渲染进程
+// （规则求值与调度细节见 main/clientConfig/，这里只做接线）
+// ============================================================
+const CLIENT_CONFIG_CHANNELS = {
+    isDuringClassHidden: 'ClassHidden',
+    isAlwaysMinimized: 'AlwaysMinimized',
+    isDuringClassCountdown: 'ClassCountdown'
+}
+
+function applyClientConfigSetting(key, value, fromRule) {
+    if (key === 'isWindowAlwaysOnTop') {
+        if (win && !win.isDestroyed()) {
+            if (value) win.setAlwaysOnTop(true, 'screen-saver', 9999999999999)
+            else win.setAlwaysOnTop(false)
+        }
+    } else {
+        const channel = CLIENT_CONFIG_CHANNELS[key]
+        if (channel && win && !win.isDestroyed()) win.webContents.send(channel, Boolean(value))
+    }
+    syncTrayCheckbox(key, Boolean(value), fromRule)
+}
+
+// 托盘里的勾选状态跟随实际生效值；被自动任务接管的项置灰，避免用户误以为点了会生效
+function syncTrayCheckbox(key, value, fromRule) {
+    if (!form || typeof form.getMenuItemById !== 'function') return
+    const item = form.getMenuItemById(key)
+    if (!item) return
+    if (item.checked !== value) item.checked = value
+    if (item.enabled === fromRule) item.enabled = !fromRule
+}
+
+clientConfig.init({
+    getLocalSetting: (key, fallback) => store.get(key, fallback),
+    applySetting: applyClientConfigSetting
+})
 
 // JSONC 简易去注释
 function stripJsonComments(str) {
@@ -801,6 +839,8 @@ function getScheduleFromCloud() {
 
                 if (win && !win.isDestroyed()) win.webContents.send('newConfig', scheduleConfigSync)
                 lastScheduleConfig = scheduleConfigSync
+                // 自动客户端配置：规则与时间基准随课表配置一起下发
+                clientConfig.updateFromSchedule(scheduleConfigSync)
 
                 // 保存到本地缓存（离线模式支持）
                 offlineCache.saveToCache(scheduleConfigSync, scheduleConfigSync.version || currentVersion)
@@ -878,6 +918,7 @@ app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
+    clientConfig.dispose()
     stopAeroMonitoring()
     clearCountdownStartupRetryTimer()
     if (countdownState.pollTimer) {
@@ -1122,43 +1163,47 @@ ipcMain.on('getWeekIndex', (e, arg) => {
             type: 'separator'
         },
         {
-            id: 'countdown',
+            id: 'isDuringClassCountdown',
             label: '课上计时',
             type: 'checkbox',
-            checked: store.get('isDuringClassCountdown', true),
+            checked: clientConfig.effective('isDuringClassCountdown', store.get('isDuringClassCountdown', true)),
+            enabled: !clientConfig.isControlled('isDuringClassCountdown'),
             click: (e) => {
                 store.set('isDuringClassCountdown', e.checked)
-                win.webContents.send('ClassCountdown', e.checked)
+                clientConfig.recompute(true)
             }
         },
         {
+            id: 'isWindowAlwaysOnTop',
             label: '窗口置顶',
             type: 'checkbox',
-            checked: store.get('isWindowAlwaysOnTop', true),
+            checked: clientConfig.effective('isWindowAlwaysOnTop', store.get('isWindowAlwaysOnTop', true)),
+            enabled: !clientConfig.isControlled('isWindowAlwaysOnTop'),
             click: (e) => {
                 store.set('isWindowAlwaysOnTop', e.checked)
-                if (store.get('isWindowAlwaysOnTop', true))
-                    win.setAlwaysOnTop(true, 'screen-saver', 9999999999999)
-                else
-                    win.setAlwaysOnTop(false)
+                clientConfig.recompute(true)
             }
         },
         {
+            id: 'isAlwaysMinimized',
             label: '始终缩小',
             type: 'checkbox',
-            checked: store.get('isAlwaysMinimized', false),
+            checked: clientConfig.effective('isAlwaysMinimized', store.get('isAlwaysMinimized', false)),
+            enabled: !clientConfig.isControlled('isAlwaysMinimized'),
             click: (e) => {
                 store.set('isAlwaysMinimized', e.checked)
-                win.webContents.send('AlwaysMinimized', e.checked)
+                clientConfig.recompute(true)
             }
         },
         {
+            id: 'isDuringClassHidden',
             label: '上课隐藏',
             type: 'checkbox',
-            checked: store.get('isDuringClassHidden', true),
+            checked: clientConfig.effective('isDuringClassHidden', store.get('isDuringClassHidden', true)),
+            enabled: !clientConfig.isControlled('isDuringClassHidden'),
             click: (e) => {
                 store.set('isDuringClassHidden', e.checked)
-                win.webContents.send('ClassHidden', e.checked)
+                clientConfig.recompute(true)
             }
         },
         {
@@ -1209,9 +1254,8 @@ ipcMain.on('getWeekIndex', (e, arg) => {
     tray.on('click', trayClicked)
     tray.on('right-click', trayClicked)
     tray.setContextMenu(form)
-    win.webContents.send('ClassCountdown', store.get('isDuringClassCountdown', true))
-    win.webContents.send('ClassHidden', store.get('isDuringClassHidden', true))
-    win.webContents.send('AlwaysMinimized', store.get('isAlwaysMinimized', false))
+    // 托盘重建后按「规则优先、本地兜底」重新下发四项实际生效值
+    clientConfig.recompute(true)
 })
 
 // 提供鼠标位置与窗口边界给渲染进程（用于穿透下的悬停检测）

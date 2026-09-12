@@ -8,6 +8,7 @@
   "scripts": {
     "debug": "electron . --enable-logging",
     "rebuild": "electron-rebuild",
+    "test": "node --test \"test/**/*.test.js\"",
     "build": "electron-builder --win --ia32",
     "ci": "electron-builder --win --ia32 --publish always"
   },
@@ -42,6 +43,7 @@
       "**/*",
       "!out/**",
       "!dist/**",
+      "!test/**",
       "!**/*.map",
       "!**/*.log"
     ],
