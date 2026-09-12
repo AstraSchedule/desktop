@@ -61,30 +61,38 @@ function buildContext(now) {
     }
 }
 
-// 每个配置项各自选出胜出规则：优先级高者胜，同优先级取作用域更具体者
+function isRuleActive(rule, ctx) {
+    try {
+        return conditions.isActive(rule.when, ctx)
+    } catch (e) {
+        console.error('[ClientConfig] 条件求值失败', rule?.taskId, e)
+        return false
+    }
+}
+
+// 优先级高者胜；同优先级取作用域更具体者
+function isBetterCandidate(candidate, current) {
+    if (!current) return true
+    if (candidate.priority !== current.priority) return candidate.priority > current.priority
+    return candidate.specificity >= current.specificity
+}
+
+function mergeRuleSettings(winners, rule, ctx) {
+    const settings = rule?.settings
+    if (!settings || typeof settings !== 'object' || !isRuleActive(rule, ctx)) return
+    const priority = Number(rule.priority) || 0
+    const specificity = Number(rule.specificity) || 0
+    for (const key of SETTING_KEYS) {
+        if (typeof settings[key] !== 'boolean') continue
+        const candidate = { value: settings[key], priority, specificity }
+        if (isBetterCandidate(candidate, winners[key])) winners[key] = candidate
+    }
+}
+
+// 每个配置项各自选出胜出规则
 function resolveSettings(ctx) {
     const winners = {}
-    for (const rule of rules) {
-        const settings = rule?.settings
-        if (!settings || typeof settings !== 'object') continue
-        let active = false
-        try {
-            active = conditions.isActive(rule.when, ctx)
-        } catch (e) {
-            console.error('[ClientConfig] 条件求值失败', rule?.taskId, e)
-        }
-        if (!active) continue
-        for (const key of SETTING_KEYS) {
-            if (typeof settings[key] !== 'boolean') continue
-            const priority = Number(rule.priority) || 0
-            const specificity = Number(rule.specificity) || 0
-            const current = winners[key]
-            const better = !current ||
-                priority > current.priority ||
-                (priority === current.priority && specificity >= current.specificity)
-            if (better) winners[key] = { value: settings[key], priority, specificity }
-        }
-    }
+    for (const rule of rules) mergeRuleSettings(winners, rule, ctx)
     return winners
 }
 

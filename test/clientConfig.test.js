@@ -64,6 +64,16 @@ test('cron prev 在命中小时之前也能找到当天更早的命中', () => {
     assert.equal(prev.getTime(), day(2026, 9, 1, 8).getTime())
 })
 
+test('cron 稀疏表达式（2 月 29 日）在 8 年窗口内也能找到前后命中', () => {
+    const spec = cron.parseCron('0 0 29 2 *')
+    // 2100 不是闰年：2096-02-29 的下一次是 2104-02-29，间隔 8 年（远超 366 天）
+    const prev = cron.prev(spec, new Date(2104, 0, 1, 0, 0, 0))
+    assert.equal(prev.getTime(), new Date(2096, 1, 29, 0, 0, 0).getTime())
+
+    const next = cron.next(spec, new Date(2096, 2, 1, 0, 0, 0))
+    assert.equal(next.getTime(), new Date(2104, 1, 29, 0, 0, 0).getTime())
+})
+
 test('cron 日与周同时受限时取「或」', () => {
     const spec = cron.parseCron('0 0 1 * 1')
     assert.ok(cron.matches(spec, day(2026, 9, 1, 0)))
@@ -280,10 +290,16 @@ test('调度器：applySetting 抛错时不记录状态，下次重算仍会重�
     assert.equal(scheduler.isControlled('isDuringClassHidden'), true)
 })
 
-test('调度器：空规则集不报错', () => {
-    setupScheduler({})
+test('调度器：空规则集回落到本地设置且标记为未接管', () => {
+    const applied = setupScheduler({ isDuringClassCountdown: false })
     scheduler.updateFromSchedule({})
     scheduler.updateFromSchedule({ client_config_rules: [] })
     scheduler.recompute(true)
+
+    const last = lastAppliedOf(applied, 'isDuringClassCountdown')
+    assert.equal(last.value, false, '无规则时使用本地值')
+    assert.equal(last.fromRule, false)
+    assert.equal(scheduler.isControlled('isDuringClassCountdown'), false)
+    assert.equal(scheduler.effective('isDuringClassCountdown', true), true, '未接管时不参与覆盖')
     scheduler.dispose()
 })
