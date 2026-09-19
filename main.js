@@ -329,9 +329,11 @@ function scheduleReconnect() {
         return;
     }
 
+    // error 与 close 会先后触发，已有重连计划时不再重复排程：
+    // 重复排程会让每轮失败多加一次计数，退避节奏被打乱
     if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
+        console.log('WebSocket reconnect already scheduled, skip duplicate');
+        return;
     }
 
     // 指数退避算法，最大延迟30秒
@@ -342,7 +344,9 @@ function scheduleReconnect() {
 
     reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
-        connect(true, true); // 重置errorFlag为true，从验证证书开始
+        // 不在此处重置 reconnectAttempts：指数退避需要在连续失败之间累积，
+        // 归零只发生在连接成功（ws.on('open')）时，否则延迟会永远停在 1 秒
+        connect();
     }, delay);
 }
 
@@ -409,12 +413,7 @@ function disconnectWebSocket() {
     }
 }
 
-function connect(rejectUnauthorized = true, resetErrorFlag = false) {
-    // 只有在需要重置时才重置errorFlag
-    if (resetErrorFlag) {
-        reconnectAttempts = 0;
-    }
-
+function connect(rejectUnauthorized = true) {
     const { agreementWs } = getProtocols()
     const server = getServer()
     const url = `${agreementWs}://${server}/ws/${classId}`
@@ -751,6 +750,23 @@ async function getScheduleFromCloudWithRetry(maxRetries = 10) {
 // 可能并发触发，响应到达时只允许最新请求生效，过期响应直接丢弃，防止旧配置覆盖新配置
 let scheduleFetchSeq = 0
 
+// 课表拉取失败重试的退避参数：服务端异常或离线时避免长期按固定间隔高频重试
+const SCHEDULE_RETRY_BASE_DELAY_MS = 5000
+const SCHEDULE_RETRY_MAX_DELAY_MS = 60000
+let scheduleRetryDelayMs = SCHEDULE_RETRY_BASE_DELAY_MS
+
+// 仅最新请求允许安排重试；被替代的请求不得发起后续请求（调度时与执行时双重校验）
+function scheduleFetchRetry(mySeq) {
+    if (mySeq !== scheduleFetchSeq) return
+    const delay = scheduleRetryDelayMs
+    scheduleRetryDelayMs = Math.min(delay * 2, SCHEDULE_RETRY_MAX_DELAY_MS)
+    setTimeout(() => {
+        if (mySeq === scheduleFetchSeq) {
+            getScheduleFromCloud()
+        }
+    }, delay)
+}
+
 function getScheduleFromCloud() {
     const { agreement } = getProtocols()
     // 添加 version 查询参数
@@ -773,25 +789,23 @@ function getScheduleFromCloud() {
         // 处理 304 状态码
         if (statusCode === 304) {
             console.log('Schedule not modified (304), no action taken');
+            // 服务端可达，重置失败重试退避
+            scheduleRetryDelayMs = SCHEDULE_RETRY_BASE_DELAY_MS
             return;
         }
 
         if (statusCode < 200 || statusCode >= 300) {
             console.error('getScheduleFromCloud request failed with status:', statusCode);
             offlineCache.setOfflineStatus(true)
-            // 仅最新请求允许安排重试；被替代的请求不得发起后续请求（调度时与执行时双重校验）
-            if (mySeq === scheduleFetchSeq) {
-                setTimeout(() => {
-                    if (mySeq === scheduleFetchSeq) {
-                        getScheduleFromCloud()
-                    }
-                }, 5000)
-            }
+            scheduleFetchRetry(mySeq)
             return;
         }
 
+        // 按流编码解码：多字节字符（中文课程名）可能被分片切断，
+        // 逐块 toString() 会把断开的半个字符解成 U+FFFD（乱码方块）
+        response.setEncoding('utf8')
         response.on('data', (chunk) => {
-            raw += chunk.toString()
+            raw += chunk
         })
         response.on('end', () => {
             try {
@@ -800,6 +814,9 @@ function getScheduleFromCloud() {
                     console.warn('[Schedule] Discard stale response: superseded by a newer request')
                     return
                 }
+                // 服务端可达，重置失败重试退避
+                scheduleRetryDelayMs = SCHEDULE_RETRY_BASE_DELAY_MS
+
                 // 检查返回的 JSON 中是否含有 version 键
                 if (scheduleConfigSync.version !== undefined) {
                     const newVersion = Number.parseInt(scheduleConfigSync.version);
@@ -875,14 +892,7 @@ function getScheduleFromCloud() {
         console.error('getScheduleFromCloud request error:', err)
         offlineCache.setOfflineStatus(true)
         // 不显示错误弹窗，仅记录错误
-        // 仅最新请求允许重试，且回调执行前再次校验，被替代的请求不得发起后续请求
-        if (mySeq === scheduleFetchSeq) {
-            setTimeout(() => {
-                if (mySeq === scheduleFetchSeq) {
-                    getScheduleFromCloud()
-                }
-            }, 5000)
-        }
+        scheduleFetchRetry(mySeq)
     })
     request.end()
 }
@@ -1336,8 +1346,10 @@ function requestWeatherWithRetry() {
     let raw = ''
     request.on('response', (response) => {
         const status = response.statusCode || 0
+        // 同上：天气文案/预警文本含中文，必须按流编码解码
+        response.setEncoding('utf8')
         response.on('data', (chunk) => {
-            raw += chunk.toString()
+            raw += chunk
         })
         response.on('end', () => {
             if (status >= 200 && status < 300) {

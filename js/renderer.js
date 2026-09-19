@@ -440,10 +440,15 @@ function setSidebar() {
 function tick(reset = false) {
     scheduleData = getScheduleData();
     setCountdownerContent()
-    if (JSON.stringify(scheduleData.scheduleArray) !== JSON.stringify(lastScheduleData.scheduleArray) ||
+    // 时间驱动的真实日程变化：只有它才需要重新拉取云端配置与天气
+    const stateChanged = JSON.stringify(scheduleData.scheduleArray) !== JSON.stringify(lastScheduleData.scheduleArray) ||
         scheduleData.currentHighlight.index !== lastScheduleData.currentHighlight.index ||
         scheduleData.currentHighlight.fullName !== lastScheduleData.currentHighlight.fullName ||
-        scheduleData.currentHighlight.type !== lastScheduleData.currentHighlight.type || reset) {
+        scheduleData.currentHighlight.type !== lastScheduleData.currentHighlight.type
+    // reset 仅表示「要求重绘」（自动客户端配置下发、临时调课、窗口状态变化等），
+    // 不参与是否需要拉取网络数据的判断，否则会与主进程的配置下发构成自激回路，
+    // 表现为请求全部成功但仍在持续快速轮询
+    if (stateChanged || reset) {
         setScheduleClass()
         // 使用 requestAnimationFrame 确保 DOM 完全渲染后再计算位置
         requestAnimationFrame(() => {
@@ -451,10 +456,14 @@ function tick(reset = false) {
         })
         setSidebar()
         setBackgroundDisplay()
-        // 仅在日程状态发生变化时重新拉取天气
-        ipcRenderer.send('getWeather', false)
-        // 状态改变时（进入下一个日程），再次调用 getScheduleFromCloud
-        ipcRenderer.send('getScheduleFromCloud');
+        // 只有时间驱动的日程变化才拉取：临时调课等本地改动会先改 scheduleArray
+        // 再调用 tick(true)，此时 stateChanged 同样为真，但不该多发网络请求
+        if (stateChanged && !reset) {
+            // 仅在日程状态发生变化时重新拉取天气
+            ipcRenderer.send('getWeather', false)
+            // 状态改变时（进入下一个日程），再次调用 getScheduleFromCloud
+            ipcRenderer.send('getScheduleFromCloud');
+        }
     } else if (lastScheduleData.wsConnected !== wsConnected) {
         // 即使没有课程变化，如果连接状态变化，也需要更新颜色
         updateClassHighlightColors(wsConnected);

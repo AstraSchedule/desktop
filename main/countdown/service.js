@@ -76,7 +76,6 @@ function collectEffectiveSchedules(records, classId) {
 function requestJsonByNet(net, url) {
     return new Promise((resolve, reject) => {
         const req = net.request({method: 'GET', url});
-        let raw = '';
         let settled = false;
         const timeoutMs = 12000;
         const timer = setTimeout(() => {
@@ -102,10 +101,14 @@ function requestJsonByNet(net, url) {
         }
 
         req.on('response', (res) => {
+            // 先按 Buffer 收集再一次性解码：逐块 toString() 会把被分片切断的
+            // 多字节字符（中文倒数日名称）解成 U+FFFD（乱码方块）
+            const chunks = [];
             res.on('data', (chunk) => {
-                raw += chunk.toString();
+                chunks.push(Buffer.from(chunk));
             });
             res.on('end', finishOnce(() => {
+                const raw = Buffer.concat(chunks).toString('utf8');
                 const code = res.statusCode || 0;
                 if (code < 200 || code >= 300) {
                     reject(new Error(`HTTP ${code}`));

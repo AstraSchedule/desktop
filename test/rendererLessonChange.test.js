@@ -6,14 +6,10 @@
 
 const test = require('node:test')
 const assert = require('node:assert')
-const fs = require('node:fs')
-const path = require('node:path')
 const vm = require('node:vm')
 
-const {createClock, quietConsole, createStorage, plain, dateKeyOf} = require('./support/vmEnv')
+const {createClock, createStorage, plain, dateKeyOf, createIpcStub, loadRendererScripts} = require('./support/vmEnv')
 
-const INDEX_JS = path.join(__dirname, '..', 'js', 'index.js')
-const RENDERER_JS = path.join(__dirname, '..', 'js', 'renderer.js')
 const STORAGE_KEY = 'lesson_override'
 // 固定时钟：2026-09-15 10:30（本地时间，星期二）
 const FIXED_NOW = new Date(2026, 8, 15, 10, 30, 0, 0)
@@ -39,33 +35,12 @@ function baseConfig() {
 
 // 加载 index.js + renderer.js，并返回可观测的上下文与 IPC 处理器表
 function loadRenderer(clock, storage) {
-    const handlers = new Map()
-    const ipcRenderer = {
-        on(channel, callback) {
-            handlers.set(channel, callback)
-        },
-        send() {},
-        invoke: async () => null
-    }
+    const ipc = createIpcStub()
     const config = baseConfig()
-    const context = vm.createContext({
-        localStorage: storage,
-        console: quietConsole(),
-        window: {astraIPC: ipcRenderer},
-        document: {addEventListener() {}, getElementById: () => null},
-        addEventListener() {},
-        requestAnimationFrame: () => 0,
-        Date: clock.DateClass,
-        tickCalls: []
-    })
-    vm.runInContext(fs.readFileSync(INDEX_JS, 'utf8'), context, {filename: 'js/index.js'})
-    vm.runInContext(`var _scheduleConfig = ${JSON.stringify(config)}`, context)
-    vm.runInContext(`var scheduleConfig = ${JSON.stringify(config)}`, context)
-    vm.runInContext('weekIndex = 1', context)
-    vm.runInContext(fs.readFileSync(RENDERER_JS, 'utf8'), context, {filename: 'js/renderer.js'})
+    const {context} = loadRendererScripts({clock, storage, config, ipc, sandbox: {tickCalls: []}})
     // tick 会触发真实渲染，这里替换成可观测的桩
     vm.runInContext('tick = function (reset) { tickCalls.push(reset) }', context)
-    return {context, handlers, config}
+    return {context, handlers: ipc.handlers, config}
 }
 
 // 模拟主进程回复：index 是用户点击的科目下标，arg.arg.index 是要改的节次
