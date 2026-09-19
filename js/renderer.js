@@ -456,7 +456,9 @@ function tick(reset = false) {
         })
         setSidebar()
         setBackgroundDisplay()
-        if (stateChanged) {
+        // 只有时间驱动的日程变化才拉取：临时调课等本地改动会先改 scheduleArray
+        // 再调用 tick(true)，此时 stateChanged 同样为真，但不该多发网络请求
+        if (stateChanged && !reset) {
             // 仅在日程状态发生变化时重新拉取天气
             ipcRenderer.send('getWeather', false)
             // 状态改变时（进入下一个日程），再次调用 getScheduleFromCloud

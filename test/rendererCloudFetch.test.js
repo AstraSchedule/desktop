@@ -94,6 +94,15 @@ test('进入下一个日程时仍会拉取云端配置与天气', () => {
     assert.strictEqual(countChannel(ipc, 'getWeather'), 1)
 })
 
+test('临时调课等本地改动只重绘，不拉取云端配置与天气', () => {
+    const {ipc, context} = setup()
+
+    // 临时调课先改 scheduleArray 再要求重绘，stateChanged 为真但不应触发网络请求
+    vm.runInContext('setLessonOverride(0, "英语"); tick(true)', context)
+
+    assert.deepStrictEqual(plain(ipc.sent), [], '本地改动只应重绘，不得触发 getScheduleFromCloud/getWeather')
+})
+
 test('云端配置下发不再自激出新的拉取请求', () => {
     const {ipc} = setup()
 
