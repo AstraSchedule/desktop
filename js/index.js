@@ -57,9 +57,9 @@ function loadLessonOverrides() {
     let raw = null
     try {
         raw = JSON.parse(localStorage.getItem(LESSON_OVERRIDE_STORAGE_KEY) || 'null')
-    } catch (e) {
-        console.warn('[LessonOverride] 临时调课数据解析失败，已重置', e)
-        raw = null
+    } catch {
+        // 数据损坏：立即清除，避免后续每次读取都重复解析同一条无效数据
+        localStorage.removeItem(LESSON_OVERRIDE_STORAGE_KEY)
     }
     const valid = raw !== null && typeof raw === 'object' && raw.date === today &&
         raw.changes !== null && typeof raw.changes === 'object'
