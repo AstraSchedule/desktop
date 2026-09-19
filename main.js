@@ -790,8 +790,11 @@ function getScheduleFromCloud() {
             return;
         }
 
+        // 按流编码解码：多字节字符（中文课程名）可能被分片切断，
+        // 逐块 toString() 会把断开的半个字符解成 U+FFFD（乱码方块）
+        response.setEncoding('utf8')
         response.on('data', (chunk) => {
-            raw += chunk.toString()
+            raw += chunk
         })
         response.on('end', () => {
             try {
@@ -1336,8 +1339,10 @@ function requestWeatherWithRetry() {
     let raw = ''
     request.on('response', (response) => {
         const status = response.statusCode || 0
+        // 同上：天气文案/预警文本含中文，必须按流编码解码
+        response.setEncoding('utf8')
         response.on('data', (chunk) => {
-            raw += chunk.toString()
+            raw += chunk
         })
         response.on('end', () => {
             if (status >= 200 && status < 300) {
