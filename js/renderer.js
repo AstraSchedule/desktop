@@ -694,10 +694,9 @@ ipcRenderer.on('getSelectedChangingClass', (e, arg) => {
     if (arg.index === -1) return
     let index = arg.arg.index;
     let selectedClass = arg.arg.classes[arg.index];
-    const date = getCurrentEditedDate();
-    const dayOfWeek = getCurrentEditedDay(date);
-    scheduleConfig.daily_class[dayOfWeek].classList[index] = selectedClass;
-    // 不持久化：改课仅在本次会话有效
+    // 按天生效：只记录当日临时调课，跨天后自动恢复云端配置
+    setLessonOverride(index, selectedClass);
+    tick(true)
 })
 
 ipcRenderer.on('openSettingDialog', () => {
