@@ -76,37 +76,8 @@ function countChannel(ipc, channel) {
     return ipc.sent.filter((message) => message.channel === channel).length
 }
 
-test('重绘（reset）不拉取云端配置与天气', () => {
-    const {ipc, context} = setup()
-
-    vm.runInContext('tick(true)', context)
-
-    assert.deepStrictEqual(plain(ipc.sent), [], 'reset 只应重绘，不得触发 getScheduleFromCloud/getWeather')
-})
-
-test('进入下一个日程时仍会拉取云端配置与天气', () => {
-    const {clock, ipc, context} = setup()
-
-    clock.set(NEXT_PERIOD_NOW)
-    vm.runInContext('tick()', context)
-
-    assert.strictEqual(countChannel(ipc, 'getScheduleFromCloud'), 1)
-    assert.strictEqual(countChannel(ipc, 'getWeather'), 1)
-})
-
-test('临时调课等本地改动只重绘，不拉取云端配置与天气', () => {
-    const {ipc, context} = setup()
-
-    // 临时调课先改 scheduleArray 再要求重绘，stateChanged 为真但不应触发网络请求
-    vm.runInContext('setLessonOverride(0, "英语"); tick(true)', context)
-
-    assert.deepStrictEqual(plain(ipc.sent), [], '本地改动只应重绘，不得触发 getScheduleFromCloud/getWeather')
-})
-
-test('云端配置下发不再自激出新的拉取请求', () => {
-    const {ipc} = setup()
-
-    // 完全按 main.js 的接线初始化：配置生效值由主进程下发到渲染进程
+// 模拟 main.js 的接线：配置成功返回后由主进程把生效值下发到渲染进程
+function applyClientConfig(ipc) {
     clientConfig.init({
         getLocalSetting: (key, fallback) => fallback,
         applySetting: (key, value) => {
@@ -120,6 +91,43 @@ test('云端配置下发不再自激出新的拉取请求', () => {
     } finally {
         clientConfig.dispose()
     }
+}
 
-    assert.deepStrictEqual(plain(ipc.sent), [], '配置下发只应重绘，不得再触发网络请求')
+test('重绘（reset）不拉取云端配置，但仍会请求天气', () => {
+    const {ipc, context} = setup()
+
+    vm.runInContext('tick(true)', context)
+
+    assert.strictEqual(countChannel(ipc, 'getScheduleFromCloud'), 0, 'reset 只应重绘，不得拉取云端配置')
+    assert.strictEqual(countChannel(ipc, 'getWeather'), 1, '重绘应顺带刷新天气')
+})
+
+test('进入下一个日程时仍会拉取云端配置与天气', () => {
+    const {clock, ipc, context} = setup()
+
+    clock.set(NEXT_PERIOD_NOW)
+    vm.runInContext('tick()', context)
+
+    assert.strictEqual(countChannel(ipc, 'getScheduleFromCloud'), 1)
+    assert.strictEqual(countChannel(ipc, 'getWeather'), 1)
+})
+
+test('临时调课等本地改动不拉取云端配置', () => {
+    const {ipc, context} = setup()
+
+    // 临时调课先改 scheduleArray 再要求重绘，stateChanged 为真也不该拉取云端配置
+    vm.runInContext('setLessonOverride(0, "英语"); tick(true)', context)
+
+    assert.strictEqual(countChannel(ipc, 'getScheduleFromCloud'), 0, '本地改动不得拉取云端配置')
+})
+
+test('云端配置下发不自激拉取课表，但必须顺带请求天气', () => {
+    const {ipc} = setup()
+
+    applyClientConfig(ipc)
+
+    assert.strictEqual(countChannel(ipc, 'getScheduleFromCloud'), 0, '配置下发不得自激出新的课表拉取')
+    // 启动时云端配置往往早于第一次周期 tick 到达，天气请求就搭在这条重绘路径上，
+    // 一旦被一起掐掉，客户端启动后会一直显示默认的 000℃
+    assert.ok(countChannel(ipc, 'getWeather') >= 1, '配置下发触发的重绘必须请求天气')
 })

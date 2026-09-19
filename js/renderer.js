@@ -445,9 +445,7 @@ function tick(reset = false) {
         scheduleData.currentHighlight.index !== lastScheduleData.currentHighlight.index ||
         scheduleData.currentHighlight.fullName !== lastScheduleData.currentHighlight.fullName ||
         scheduleData.currentHighlight.type !== lastScheduleData.currentHighlight.type
-    // reset 仅表示「要求重绘」（自动客户端配置下发、临时调课、窗口状态变化等），
-    // 不参与是否需要拉取网络数据的判断，否则会与主进程的配置下发构成自激回路，
-    // 表现为请求全部成功但仍在持续快速轮询
+    // reset 仅表示「要求重绘」（自动客户端配置下发、临时调课、窗口状态变化等）
     if (stateChanged || reset) {
         setScheduleClass()
         // 使用 requestAnimationFrame 确保 DOM 完全渲染后再计算位置
@@ -456,11 +454,13 @@ function tick(reset = false) {
         })
         setSidebar()
         setBackgroundDisplay()
-        // 只有时间驱动的日程变化才拉取：临时调课等本地改动会先改 scheduleArray
-        // 再调用 tick(true)，此时 stateChanged 同样为真，但不该多发网络请求
+        // 天气与课表配置的触发条件不同，不能合并判断：天气不参与任何反馈回路，
+        // 重绘时也要刷新。启动时云端配置往往早于第一次周期 tick 到达，天气请求正是搭在
+        // 这条重绘路径上，若只由时间驱动的日程变化触发，客户端会一直停在默认的 000℃
+        ipcRenderer.send('getWeather', false)
+        // 课表拉取只由时间驱动的日程变化触发：临时调课等本地改动会先改 scheduleArray
+        // 再调用 tick(true)，此时 stateChanged 同样为真，但拉取会与配置下发构成自激回路
         if (stateChanged && !reset) {
-            // 仅在日程状态发生变化时重新拉取天气
-            ipcRenderer.send('getWeather', false)
             // 状态改变时（进入下一个日程），再次调用 getScheduleFromCloud
             ipcRenderer.send('getScheduleFromCloud');
         }
