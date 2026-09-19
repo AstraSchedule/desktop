@@ -81,9 +81,19 @@ function createIpcStub() {
     }
 }
 
+// runRepoScript 执行仓库内的渲染脚本（源码来自测试仓库文件，不是外部输入），
+// 用 vm.Script 显式承载源码，避免把拼接出来的字符串交给 vm.runInContext
+function runRepoScript(file, filename, context) {
+    const source = fs.readFileSync(file, 'utf8')
+    // 源码来自仓库内的渲染脚本（测试夹具），不是用户输入；vm 无法用字面量源码执行文件内容
+    new vm.Script(source, {filename}).runInContext(context) // NOSONAR
+}
+
 // loadRendererScripts 在最小 DOM 桩上加载 index.js + renderer.js。
 // 需要真实 DOM 的绘制函数由调用方按需替换；sandbox 用于注入 $ 之类的额外全局量。
 function loadRendererScripts({clock, storage, config, ipc, weekIndex = 1, sandbox = {}}) {
+    // index.js 从 localStorage 读取周次，用种子值代替向 vm 里注入赋值语句
+    storage.setItem('weekIndex', String(weekIndex))
     const context = vm.createContext({
         localStorage: storage,
         console: quietConsole(),
@@ -92,14 +102,13 @@ function loadRendererScripts({clock, storage, config, ipc, weekIndex = 1, sandbo
         addEventListener() {},
         requestAnimationFrame: () => 0,
         Date: clock.DateClass,
+        // 课表配置作为沙箱全局量注入，同样避免执行拼接代码
+        _scheduleConfig: config,
+        scheduleConfig: config,
         ...sandbox,
     })
-    vm.runInContext(fs.readFileSync(INDEX_JS, 'utf8'), context, {filename: 'js/index.js'})
-    const json = JSON.stringify(config)
-    vm.runInContext(`var _scheduleConfig = ${json}`, context)
-    vm.runInContext(`var scheduleConfig = ${json}`, context)
-    vm.runInContext(`weekIndex = ${weekIndex}`, context)
-    vm.runInContext(fs.readFileSync(RENDERER_JS, 'utf8'), context, {filename: 'js/renderer.js'})
+    runRepoScript(INDEX_JS, 'js/index.js', context)
+    runRepoScript(RENDERER_JS, 'js/renderer.js', context)
     return {context, ipc}
 }
 
