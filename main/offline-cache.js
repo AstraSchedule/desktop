@@ -33,17 +33,20 @@ class OfflineCache {
     }
 
     /**
-     * 规范化版本号，仅允许 'latest' 或非负整数
+     * 规范化版本号，仅允许 'latest' 或由数字与分隔符组成的版本串。
+     * 服务端下发的是 "<数据版本>:<周次>"（如 1758288000:5，见 usr-backend 的
+     * scheduleVersion），旧客户端只发纯数据版本，两种都要接受；冒号在 Windows
+     * 文件名中非法，统一替换为连字符。只放行数字与分隔符，避免目录穿越。
      */
     normalizeVersion(version) {
         if (version === 'latest') {
             return 'latest';
         }
-        const num = Number(version);
-        if (!Number.isInteger(num) || num < 0) {
+        const text = String(version ?? '');
+        if (!/^\d+(?:[:-]\d+)*$/.test(text)) {
             throw new Error('Invalid cache version');
         }
-        return String(num);
+        return text.replaceAll(':', '-');
     }
 
     /**
@@ -120,8 +123,9 @@ class OfflineCache {
                 });
             }
 
-            // 按版本号排序，保留最近的版本
-            index.versions.sort((a, b) => b.version - a.version);
+            // 按写入时间倒序保留最近的版本：版本号是含周次的字符串，相减会得到 NaN，
+            // 排序失效后裁剪掉的会是最新版本
+            index.versions.sort((a, b) => b.timestamp - a.timestamp);
             if (index.versions.length > this.maxVersions) {
                 const removedVersions = index.versions.splice(this.maxVersions);
                 // 删除旧版本文件
