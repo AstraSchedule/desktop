@@ -923,6 +923,9 @@ function getScheduleFromCloud() {
                     : EDGE_BLOCK_RETRY_DELAY_MS
             } else {
                 console.error('getScheduleFromCloud request failed with status:', statusCode);
+                // 不是边缘拦截了：说明边缘限流已解除，回到普通退避序列，
+                // 否则会继续按分钟/小时级退避，服务端恢复后也要很久才重试
+                edgeBlockRetryDelayMs = 0
             }
             // 403（限流）等非 2xx 同样属于云端不可用：冷启动时必须回落到本地缓存，
             // 否则课表会一直空着（原先只有「连不上主机」才会用缓存）
@@ -1012,7 +1015,15 @@ function getScheduleFromCloud() {
         })
     })
     request.on('error', (err) => {
+        // 已被更新请求取代的失败不得改动离线状态、也不推进重试：
+        // 过期的请求 A 出错时若请求 B 已成功，A 会把离线标记重新点亮
+        if (mySeq !== scheduleFetchSeq) {
+            console.warn('[Schedule] Discard stale request error: superseded by a newer request')
+            return
+        }
         console.error('getScheduleFromCloud request error:', err)
+        // 连接层错误不是边缘拦截的判据，同样回到普通退避序列
+        edgeBlockRetryDelayMs = 0
         loadScheduleFromCache('request-error')
         offlineCache.setOfflineStatus(true)
         // 不显示错误弹窗，仅记录错误
