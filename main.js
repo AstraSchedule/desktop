@@ -760,6 +760,10 @@ function loadScheduleFromCache(reason) {
         ? cachedData.data.countdown_records
         : []
     if (win && !win.isDestroyed()) win.webContents.send('newConfig', cachedData.data)
+    // 自动客户端配置规则同样要生效（与云端成功路径一致），否则离线启动时
+    // 窗口置顶/上课隐藏/始终缩小/课上倒计时整套规则失效，静默退回本地设置。
+    // 规则只驱动窗口与托盘行为、不触发课表拉取，因此不会构成配置下发的自激回路。
+    clientConfig.updateFromSchedule(cachedData.data)
     console.log(`[OfflineCache] Loaded schedule from cache (${reason})`)
 
     if (applyStartupBehavior(cachedData.data, 'cache')) return true
