@@ -83,6 +83,12 @@ const {registerCountdownIpc} = require('./main/countdown/ipc');
 const {processCountdownFromSchedule, pushCountdownItems} = require('./main/countdown/service');
 const {showCountdownWindow, hideCountdownWindow} = require('./main/countdown/window');
 const { OfflineCache } = require('./main/offline-cache');
+const {
+    ScheduleRefresh,
+    describeIntervalSeconds,
+    MIN_SECONDS,
+    MAX_SECONDS,
+} = require('./main/scheduleRefresh');
 
 // 初始化离线缓存
 const offlineCache = new OfflineCache();
@@ -360,6 +366,16 @@ function scheduleReconnect() {
 // 在主进程中直接更新 Tray Tooltip 的辅助函数
 let websocketDisabled = false; // 全局标志，表示 WebSocket 是否被禁用
 let currentConnectionState = false; // 全局标志，记录当前连接状态
+
+// 课表定时拉取。只在服务端不支持 WebSocket 推送（serverless）时生效：
+// 那种部署下客户端只剩「启动 / 下一个日程 / 失败重试」三个拉取时机。
+// 配置项见托盘菜单「轮询间隔」，默认关闭；配合 ESA 边缘缓存，单次拉取通常只是一个 304。
+const scheduleRefresh = new ScheduleRefresh({
+    store,
+    fetchSchedule: () => getScheduleFromCloud(),
+    isPushDisabled: () => websocketDisabled,
+    log: (message) => console.log(message),
+})
 
 // 云端不可用时，在托盘提示里说明当前画面的数据来源。
 // 离线标志不再画在窗口里，状态统一在托盘图标悬停提示中体现。
@@ -970,6 +986,8 @@ function getScheduleFromCloud() {
 
                 // 根据 supportWebSocket 值决定是否连接 WebSocket
                 websocketDisabled = !supportWebSocket; // 更新全局状态
+                // 是否支持推送要等这次响应才知道，配置了轮询的用户在这里才真正启动定时器
+                scheduleRefresh.apply()
 
                 if (!supportWebSocket) {
                     // 如果不支持 WebSocket，则断开现有连接并停止重连机制
@@ -1071,6 +1089,7 @@ app.on('before-quit', () => {
     clientConfig.dispose()
     stopAeroMonitoring()
     clearCountdownStartupRetryTimer()
+    scheduleRefresh.stop()
     if (countdownState.pollTimer) {
         clearInterval(countdownState.pollTimer)
         countdownState.pollTimer = null
@@ -1235,6 +1254,36 @@ ipcMain.on('getWeekIndex', (e, arg) => {
             click: () => {
                 // 与 Serverless 模式一致：直接拉取课表（服务端已废弃外部广播入口）
                 getScheduleFromCloud();
+            }
+        },
+        {
+            icon: asset('image', 'toggle.png'),
+            label: `轮询间隔（${describeIntervalSeconds(scheduleRefresh.savedSeconds())}）`,
+            click: () => {
+                prompt({
+                    title: '轮询间隔',
+                    label: `服务端不支持推送时定时拉取课表，单位秒，0 表示不轮询（最小 ${MIN_SECONDS}，最大 ${MAX_SECONDS}）。`,
+                    value: String(scheduleRefresh.savedSeconds()),
+                    inputAttrs: {
+                        type: 'string'
+                    },
+                    type: 'input',
+                    height: 200,
+                    width: 460,
+                    icon: asset('image', 'toggle.png'),
+                }).then((r) => {
+                    if (r === null) return
+                    const result = scheduleRefresh.setSeconds(String(r).trim())
+                    if (!result.ok) {
+                        dialog.showMessageBox(win, { message: result.reason }).then(doNothing)
+                        return
+                    }
+                    // 托盘菜单是一次性 buildFromTemplate 出来的，标签要等下次重建才刷新，
+                    // 所以这里直接把结果告诉用户
+                    dialog.showMessageBox(win, {
+                        message: `轮询间隔已设置为 ${describeIntervalSeconds(result.seconds)}。`
+                    }).then(doNothing)
+                })
             }
         },
         {
