@@ -683,8 +683,13 @@ function setupAutoUpdater() {
     }
 }
 
-// 存储当前版本号
+// 课表数据版本号（数值），仅用于判断版本是否推进，避免回退的旧配置覆盖新配置
 let currentVersion = 0;
+// 回传给服务端的版本令牌：服务端下发的是 "<数据版本>:<周次>[:<boundary>]" 复合串
+// （见 usr-backend 的 scheduleVersion），必须原样回传才能命中 304。
+// 服务端按不透明串解析，只回传数据版本会被判为旧客户端——week 记为 0，
+// 条件永不成立，于是每次都返回全量配置。
+let currentVersionToken = '0';
 // 标志：是否已经进行过第一次课表数据获取和 WebSocket 初始化
 let hasInitializedWebSocket = false;
 
@@ -825,7 +830,7 @@ function scheduleFetchRetry(mySeq) {
 function getScheduleFromCloud() {
     const { agreement } = getProtocols()
     // 添加 version 查询参数
-    const url = `${agreement}://${getServer()}/${classId}?version=${currentVersion}`
+    const url = `${agreement}://${getServer()}/${classId}?version=${encodeURIComponent(currentVersionToken)}`
     console.log('Requesting schedule from cloud:', url);
 
     // 本次请求的序号，响应到达时校验是否仍为最新请求
@@ -844,7 +849,9 @@ function getScheduleFromCloud() {
         // 处理 304 状态码
         if (statusCode === 304) {
             console.log('Schedule not modified (304), no action taken');
-            // 服务端可达，重置失败重试退避
+            // 能拿到 304 说明服务端可达：离线状态与失败退避都要复位，
+            // 否则「离线期间服务端无改动 → 恢复后首个请求命中 304」会让客户端一直显示离线
+            offlineCache.setOfflineStatus(false)
             scheduleRetryDelayMs = SCHEDULE_RETRY_BASE_DELAY_MS
             return;
         }
@@ -877,6 +884,8 @@ function getScheduleFromCloud() {
 
                 // 检查返回的 JSON 中是否含有 version 键
                 if (scheduleConfigSync.version !== undefined) {
+                    // 回传令牌原样保留（含周次与 boundary），不要把数值比较用的 currentVersion 当令牌发出去
+                    currentVersionToken = String(scheduleConfigSync.version)
                     const newVersion = Number.parseInt(scheduleConfigSync.version);
                     if (!Number.isNaN(newVersion) && newVersion > currentVersion) {
                         currentVersion = newVersion;
@@ -918,7 +927,7 @@ function getScheduleFromCloud() {
                 clientConfig.updateFromSchedule(scheduleConfigSync)
 
                 // 保存到本地缓存（离线模式支持）
-                offlineCache.saveToCache(scheduleConfigSync, scheduleConfigSync.version || currentVersion)
+                offlineCache.saveToCache(scheduleConfigSync, scheduleConfigSync.version || currentVersionToken)
                 offlineCache.setOfflineStatus(false)
 
                 // 根据 startup_behavior 决定窗口行为
