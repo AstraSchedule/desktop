@@ -214,6 +214,8 @@ function astraRequest(options) {
 let classId = String(store.get("class", "39/2023/1"))
 let isFromCloud = store.get('isFromCloud', false)
 let lastScheduleConfig = null
+// 当前画面配置的来源：'cloud'（云端）/ 'cache'（本地缓存）/ null（还没有可用配置）
+let lastScheduleSource = null
 console.log('Class:', classId, 'Server:', getServer(), 'Secure:', store.get("isSecureConnection", true), 'Cloud:', isFromCloud);
 
 const countdownCtx = {
@@ -354,10 +356,14 @@ function scheduleReconnect() {
 let websocketDisabled = false; // 全局标志，表示 WebSocket 是否被禁用
 let currentConnectionState = false; // 全局标志，记录当前连接状态
 
-// 数据来自本地离线缓存时，在托盘提示里补充来源说明。
-// 离线标志不再画在窗口里，状态统一在托盘图标悬停提示中体现
+// 云端不可用时，在托盘提示里说明当前画面的数据来源。
+// 离线标志不再画在窗口里，状态统一在托盘图标悬停提示中体现。
+// 注意：只有真的取了缓存才能说「数据来源: 本地离线缓存」，否则会误导排查方向。
 function offlineTraySuffix() {
-    return offlineCache.getOfflineStatus().isOffline ? '\n数据来源: 本地离线缓存（云端暂不可用）' : '';
+    if (!offlineCache.getOfflineStatus().isOffline) return '';
+    if (lastScheduleSource === 'cache') return '\n数据来源: 本地离线缓存（云端暂不可用）';
+    if (lastScheduleSource === 'cloud') return '\n云端暂不可用（显示上次成功获取的配置）';
+    return '\n云端暂不可用，且无可用缓存';
 }
 
 function updateTrayTooltip(connected, forceGreen) {
@@ -761,6 +767,7 @@ function loadScheduleFromCache(reason) {
 
     offlineCache.setOfflineStatus(true)
     lastScheduleConfig = cachedData.data
+    lastScheduleSource = 'cache'
     countdownState.scheduleCountdownRecords = Array.isArray(cachedData.data.countdown_records)
         ? cachedData.data.countdown_records
         : []
@@ -813,13 +820,27 @@ let scheduleFetchSeq = 0
 // 课表拉取失败重试的退避参数：服务端异常或离线时避免长期按固定间隔高频重试
 const SCHEDULE_RETRY_BASE_DELAY_MS = 5000
 const SCHEDULE_RETRY_MAX_DELAY_MS = 60000
+// 边缘节点（CDN/WAF，如阿里云 ESA）的速率限制通常按来源 IP 封禁，且可能因持续请求而延长封禁。
+// 命中时从 1 分钟起步、上限 15 分钟：短封禁能较快恢复，长封禁也不会一直喂规则
+const EDGE_BLOCK_RETRY_DELAY_MS = 60000
+const EDGE_BLOCK_MAX_RETRY_DELAY_MS = 900000
 let scheduleRetryDelayMs = SCHEDULE_RETRY_BASE_DELAY_MS
+let scheduleRetryMaxDelayMs = SCHEDULE_RETRY_MAX_DELAY_MS
+
+// 识别边缘节点（CDN/WAF）的拦截响应，例如阿里云 ESA 限流：
+// X-Tengine-Error: denied by http_ratelimit。
+// 只认这个响应头：它是边缘节点自己生成拦截页的确定性标志，而 Server: ESA
+// 在正常经过 ESA 的响应上也会出现，用它判断会把应用自身的 4xx 误判成限流。
+// 只记录该响应头（基础设施信息），不落响应体，避免把服务端内容写进日志。
+function edgeBlockReason(response) {
+    return String(response.headers?.['x-tengine-error'] || '')
+}
 
 // 仅最新请求允许安排重试；被替代的请求不得发起后续请求（调度时与执行时双重校验）
 function scheduleFetchRetry(mySeq) {
     if (mySeq !== scheduleFetchSeq) return
     const delay = scheduleRetryDelayMs
-    scheduleRetryDelayMs = Math.min(delay * 2, SCHEDULE_RETRY_MAX_DELAY_MS)
+    scheduleRetryDelayMs = Math.min(delay * 2, scheduleRetryMaxDelayMs)
     setTimeout(() => {
         if (mySeq === scheduleFetchSeq) {
             getScheduleFromCloud()
@@ -853,11 +874,19 @@ function getScheduleFromCloud() {
             // 否则「离线期间服务端无改动 → 恢复后首个请求命中 304」会让客户端一直显示离线
             offlineCache.setOfflineStatus(false)
             scheduleRetryDelayMs = SCHEDULE_RETRY_BASE_DELAY_MS
+            scheduleRetryMaxDelayMs = SCHEDULE_RETRY_MAX_DELAY_MS
             return;
         }
 
         if (statusCode < 200 || statusCode >= 300) {
-            console.error('getScheduleFromCloud request failed with status:', statusCode);
+            const edgeBlock = edgeBlockReason(response)
+            if (edgeBlock) {
+                console.error(`getScheduleFromCloud blocked by edge node: status=${statusCode}, ${edgeBlock}`)
+                scheduleRetryMaxDelayMs = EDGE_BLOCK_MAX_RETRY_DELAY_MS
+                scheduleRetryDelayMs = Math.max(scheduleRetryDelayMs, EDGE_BLOCK_RETRY_DELAY_MS)
+            } else {
+                console.error('getScheduleFromCloud request failed with status:', statusCode);
+            }
             // 403（限流）等非 2xx 同样属于云端不可用：冷启动时必须回落到本地缓存，
             // 否则课表会一直空着（原先只有「连不上主机」才会用缓存）
             loadScheduleFromCache(`http-${statusCode}`)
@@ -881,6 +910,7 @@ function getScheduleFromCloud() {
                 }
                 // 服务端可达，重置失败重试退避
                 scheduleRetryDelayMs = SCHEDULE_RETRY_BASE_DELAY_MS
+                scheduleRetryMaxDelayMs = SCHEDULE_RETRY_MAX_DELAY_MS
 
                 // 检查返回的 JSON 中是否含有 version 键
                 if (scheduleConfigSync.version !== undefined) {
@@ -923,6 +953,7 @@ function getScheduleFromCloud() {
 
                 if (win && !win.isDestroyed()) win.webContents.send('newConfig', scheduleConfigSync)
                 lastScheduleConfig = scheduleConfigSync
+                lastScheduleSource = 'cloud'
                 // 自动客户端配置：规则与时间基准随课表配置一起下发
                 clientConfig.updateFromSchedule(scheduleConfigSync)
 
