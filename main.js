@@ -820,10 +820,11 @@ let scheduleFetchSeq = 0
 // 课表拉取失败重试的退避参数：服务端异常或离线时避免长期按固定间隔高频重试
 const SCHEDULE_RETRY_BASE_DELAY_MS = 5000
 const SCHEDULE_RETRY_MAX_DELAY_MS = 60000
-// 边缘节点（CDN/WAF，如阿里云 ESA）的速率限制通常按来源 IP 封禁，且可能因持续请求而延长封禁。
-// 命中时从 1 分钟起步、上限 15 分钟：短封禁能较快恢复，长封禁也不会一直喂规则
+// 边缘节点（CDN/WAF，如阿里云 ESA）的速率限制按来源 IP 封禁，本站规则配置的封禁时长为 1 小时。
+// 命中时从 1 分钟起步、上限 1 小时（1m→2m→4m→…→60m）：若封禁即将结束可以较快恢复，
+// 而 1 小时窗口内总共只发出个位数请求，不会把规则再次喂起来
 const EDGE_BLOCK_RETRY_DELAY_MS = 60000
-const EDGE_BLOCK_MAX_RETRY_DELAY_MS = 900000
+const EDGE_BLOCK_MAX_RETRY_DELAY_MS = 3600000
 let scheduleRetryDelayMs = SCHEDULE_RETRY_BASE_DELAY_MS
 let scheduleRetryMaxDelayMs = SCHEDULE_RETRY_MAX_DELAY_MS
 
@@ -841,6 +842,8 @@ function scheduleFetchRetry(mySeq) {
     if (mySeq !== scheduleFetchSeq) return
     const delay = scheduleRetryDelayMs
     scheduleRetryDelayMs = Math.min(delay * 2, scheduleRetryMaxDelayMs)
+    // 把实际退避间隔写进日志：边缘限流时会拉长到分钟/小时级，便于判断是被封还是真离线
+    console.log(`[Schedule] Next retry in ${Math.round(delay / 1000)}s`)
     setTimeout(() => {
         if (mySeq === scheduleFetchSeq) {
             getScheduleFromCloud()
