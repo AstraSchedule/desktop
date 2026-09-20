@@ -160,7 +160,9 @@ function stripJsonComments(str) {
 function getUserConfigPath() {
     try {
         return path.join(app.getPath('userData'), 'scheduleConfig.user.jsonc')
-    } catch {
+    } catch (error) {
+        // 只记录错误类别：路径与配置内容都不进日志
+        console.warn('[Startup] Failed to resolve local user config path:', error?.code || error?.name || 'unknown error')
         return null
     }
 }
@@ -174,10 +176,13 @@ function readUserConfigSafe() {
         const cleaned = stripJsonComments(raw);
         try {
             return JSON.parse(cleaned)
-        } catch {
+        } catch (error) {
+            // 区分"没有本地配置"与"本地配置坏了"：后者此前完全静默
+            console.warn('[Startup] Failed to parse local user config:', error?.name || 'unknown error')
             return null
         }
-    } catch {
+    } catch (error) {
+        console.warn('[Startup] Failed to read local user config:', error?.code || error?.name || 'unknown error')
         return null
     }
 }
@@ -214,6 +219,8 @@ function astraRequest(options) {
 let classId = String(store.get("class", "39/2023/1"))
 let isFromCloud = store.get('isFromCloud', false)
 let lastScheduleConfig = null
+// 当前画面配置的来源：'cloud'（云端）/ 'cache'（本地缓存）/ null（还没有可用配置）
+let lastScheduleSource = null
 console.log('Class:', classId, 'Server:', getServer(), 'Secure:', store.get("isSecureConnection", true), 'Cloud:', isFromCloud);
 
 const countdownCtx = {
@@ -354,10 +361,14 @@ function scheduleReconnect() {
 let websocketDisabled = false; // 全局标志，表示 WebSocket 是否被禁用
 let currentConnectionState = false; // 全局标志，记录当前连接状态
 
-// 数据来自本地离线缓存时，在托盘提示里补充来源说明。
-// 离线标志不再画在窗口里，状态统一在托盘图标悬停提示中体现
+// 云端不可用时，在托盘提示里说明当前画面的数据来源。
+// 离线标志不再画在窗口里，状态统一在托盘图标悬停提示中体现。
+// 注意：只有真的取了缓存才能说「数据来源: 本地离线缓存」，否则会误导排查方向。
 function offlineTraySuffix() {
-    return offlineCache.getOfflineStatus().isOffline ? '\n数据来源: 本地离线缓存（云端暂不可用）' : '';
+    if (!offlineCache.getOfflineStatus().isOffline) return '';
+    if (lastScheduleSource === 'cache') return '\n数据来源: 本地离线缓存（云端暂不可用）';
+    if (lastScheduleSource === 'cloud') return '\n云端暂不可用（显示上次成功获取的配置）';
+    return '\n云端暂不可用，且无可用缓存';
 }
 
 function updateTrayTooltip(connected, forceGreen) {
@@ -759,6 +770,9 @@ function loadScheduleFromCache(reason) {
         return false
     }
 
+    // 先落来源再改离线状态：setOfflineStatus 会在状态变化时同步触发托盘刷新，
+    // 顺序反了那次刷新会读到旧的 lastScheduleSource，提示就变成上一句
+    lastScheduleSource = 'cache'
     offlineCache.setOfflineStatus(true)
     lastScheduleConfig = cachedData.data
     countdownState.scheduleCountdownRecords = Array.isArray(cachedData.data.countdown_records)
@@ -813,13 +827,48 @@ let scheduleFetchSeq = 0
 // 课表拉取失败重试的退避参数：服务端异常或离线时避免长期按固定间隔高频重试
 const SCHEDULE_RETRY_BASE_DELAY_MS = 5000
 const SCHEDULE_RETRY_MAX_DELAY_MS = 60000
+// 边缘节点（CDN/WAF，如阿里云 ESA）的频次控制规则按来源 IP 封禁，本站配置的封禁时长为 1 小时。
+// 官方文档只说明"拦截封禁 10 秒–24 小时"，未说明封禁期间的新请求是否会重置计时，
+// 因此退避间隔必须最终超过封禁时长：即便边缘实现是"每次命中就重新计时"，
+// 客户端也不会把自己续成永久封禁（间隔 4 小时 > 封禁 1 小时，中间始终有可用窗口）。
+// 序列 1m → 4m → 16m → 64m → 4h → 4h…：1 小时内只探测 3 次，
+// 配置的 1 小时封禁若已到期，最迟在 64 分钟那次就能恢复
+const EDGE_BLOCK_RETRY_DELAY_MS = 60000
+const EDGE_BLOCK_RETRY_FACTOR = 4
+const EDGE_BLOCK_MAX_RETRY_DELAY_MS = 14400000
 let scheduleRetryDelayMs = SCHEDULE_RETRY_BASE_DELAY_MS
+// 当前是否处于边缘限流状态；非 0 时走上面那条更长的独立退避序列
+let edgeBlockRetryDelayMs = 0
+
+// 识别边缘节点（CDN/WAF）的拦截响应，例如阿里云 ESA 限流：
+// X-Tengine-Error: denied by http_ratelimit。
+// 只认这个响应头：它是边缘节点自己生成拦截页的确定性标志，而 Server: ESA
+// 在正常经过 ESA 的响应上也会出现，用它判断会把应用自身的 4xx 误判成限流。
+// 只记录该响应头（基础设施信息），不落响应体，避免把服务端内容写进日志。
+function edgeBlockReason(response) {
+    return String(response.headers?.['x-tengine-error'] || '')
+}
+
+// 服务端恢复可达后把两条退避序列都复位
+function resetScheduleRetryBackoff() {
+    scheduleRetryDelayMs = SCHEDULE_RETRY_BASE_DELAY_MS
+    edgeBlockRetryDelayMs = 0
+}
+
+// 计算下一次重试的间隔：边缘限流走独立的更长序列，其它失败走普通退避
+function nextScheduleRetryDelay() {
+    if (edgeBlockRetryDelayMs) return edgeBlockRetryDelayMs
+    const delay = scheduleRetryDelayMs
+    scheduleRetryDelayMs = Math.min(delay * 2, SCHEDULE_RETRY_MAX_DELAY_MS)
+    return delay
+}
 
 // 仅最新请求允许安排重试；被替代的请求不得发起后续请求（调度时与执行时双重校验）
 function scheduleFetchRetry(mySeq) {
     if (mySeq !== scheduleFetchSeq) return
-    const delay = scheduleRetryDelayMs
-    scheduleRetryDelayMs = Math.min(delay * 2, SCHEDULE_RETRY_MAX_DELAY_MS)
+    const delay = nextScheduleRetryDelay()
+    // 把实际退避间隔写进日志：边缘限流时会拉长到分钟/小时级，便于判断是被封还是真离线
+    console.log(`[Schedule] Next retry in ${Math.round(delay / 1000)}s`)
     setTimeout(() => {
         if (mySeq === scheduleFetchSeq) {
             getScheduleFromCloud()
@@ -846,18 +895,38 @@ function getScheduleFromCloud() {
         const statusCode = response.statusCode;
         console.log('getScheduleFromCloud response status:', statusCode);
 
+        // 已被更新请求取代的响应不得改动共享状态（离线标记、边缘限流退避）。
+        // 下面 end 里还有一道检查，两者覆盖不同的竞态窗口：这里防的是"响应头已到、
+        // 期间又发起了新请求"，那里防的是"读响应体期间被取代"
+        if (mySeq !== scheduleFetchSeq) {
+            console.warn('[Schedule] Discard stale response before handling: superseded by a newer request')
+            response.resume()
+            return;
+        }
+
         // 处理 304 状态码
         if (statusCode === 304) {
             console.log('Schedule not modified (304), no action taken');
             // 能拿到 304 说明服务端可达：离线状态与失败退避都要复位，
             // 否则「离线期间服务端无改动 → 恢复后首个请求命中 304」会让客户端一直显示离线
             offlineCache.setOfflineStatus(false)
-            scheduleRetryDelayMs = SCHEDULE_RETRY_BASE_DELAY_MS
+            resetScheduleRetryBackoff()
             return;
         }
 
         if (statusCode < 200 || statusCode >= 300) {
-            console.error('getScheduleFromCloud request failed with status:', statusCode);
+            const edgeBlock = edgeBlockReason(response)
+            if (edgeBlock) {
+                console.error(`getScheduleFromCloud blocked by edge node: status=${statusCode}, ${edgeBlock}`)
+                edgeBlockRetryDelayMs = edgeBlockRetryDelayMs
+                    ? Math.min(edgeBlockRetryDelayMs * EDGE_BLOCK_RETRY_FACTOR, EDGE_BLOCK_MAX_RETRY_DELAY_MS)
+                    : EDGE_BLOCK_RETRY_DELAY_MS
+            } else {
+                console.error('getScheduleFromCloud request failed with status:', statusCode);
+                // 不是边缘拦截了：说明边缘限流已解除，回到普通退避序列，
+                // 否则会继续按分钟/小时级退避，服务端恢复后也要很久才重试
+                edgeBlockRetryDelayMs = 0
+            }
             // 403（限流）等非 2xx 同样属于云端不可用：冷启动时必须回落到本地缓存，
             // 否则课表会一直空着（原先只有「连不上主机」才会用缓存）
             loadScheduleFromCache(`http-${statusCode}`)
@@ -879,8 +948,8 @@ function getScheduleFromCloud() {
                     console.warn('[Schedule] Discard stale response: superseded by a newer request')
                     return
                 }
-                // 服务端可达，重置失败重试退避
-                scheduleRetryDelayMs = SCHEDULE_RETRY_BASE_DELAY_MS
+                // 服务端可达，重置失败重试退避（含边缘限流的独立序列）
+                resetScheduleRetryBackoff()
 
                 // 检查返回的 JSON 中是否含有 version 键
                 if (scheduleConfigSync.version !== undefined) {
@@ -923,6 +992,7 @@ function getScheduleFromCloud() {
 
                 if (win && !win.isDestroyed()) win.webContents.send('newConfig', scheduleConfigSync)
                 lastScheduleConfig = scheduleConfigSync
+                lastScheduleSource = 'cloud'
                 // 自动客户端配置：规则与时间基准随课表配置一起下发
                 clientConfig.updateFromSchedule(scheduleConfigSync)
 
@@ -945,7 +1015,15 @@ function getScheduleFromCloud() {
         })
     })
     request.on('error', (err) => {
+        // 已被更新请求取代的失败不得改动离线状态、也不推进重试：
+        // 过期的请求 A 出错时若请求 B 已成功，A 会把离线标记重新点亮
+        if (mySeq !== scheduleFetchSeq) {
+            console.warn('[Schedule] Discard stale request error: superseded by a newer request')
+            return
+        }
         console.error('getScheduleFromCloud request error:', err)
+        // 连接层错误不是边缘拦截的判据，同样回到普通退避序列
+        edgeBlockRetryDelayMs = 0
         loadScheduleFromCache('request-error')
         offlineCache.setOfflineStatus(true)
         // 不显示错误弹窗，仅记录错误

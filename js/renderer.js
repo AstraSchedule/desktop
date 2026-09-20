@@ -64,6 +64,8 @@ let isClassCountdown = true
 let isClassHidden = true
 let isAlwaysMinimized = false // 始终缩小状态
 let isSecureConnection = true // 渲染态标记
+// 是否已经收到过云端（或离线缓存）下发的配置；没有配置时页面会停在 :root{display:none}
+let hasConfigFromCloud = false
 let lastScheduleData = {
     currentHighlight: {
         index: null,
@@ -644,6 +646,26 @@ async function initDomAndStart() {
     if (wsConnected !== undefined) {
         updateUIColorsForConnectionStatus(wsConnected);
     }
+
+    // 兜底显示：迟迟拿不到任何配置（云端不可用且无本地缓存）时，按本地配置的启动行为
+    // 决定是否先把窗口显示出来。否则页面停在 css 的 :root{display:none}，
+    // 用户只看到一个托盘图标，既没有课表也没有任何提示，无从判断是"没数据"还是"没启动"
+    setTimeout(revealWindowWithoutConfig, CONFIG_WAIT_REVEAL_MS)
+}
+
+// 等待配置的宽限时间：超过它仍无配置就按本地 startup_behavior 兜底显示
+const CONFIG_WAIT_REVEAL_MS = 8000
+
+function revealWindowWithoutConfig() {
+    if (hasConfigFromCloud) return
+    const behavior = scheduleConfig?.startup_behavior || 'normal'
+    if (behavior !== 'normal') {
+        console.log('[Startup] No schedule config yet, keep hidden by local startup_behavior:', behavior)
+        return
+    }
+    if (!root) return
+    console.log('[Startup] No schedule config yet, revealing window with local config')
+    root.style.display = 'block'
 }
 
 globalThis.addEventListener('DOMContentLoaded', () => {
@@ -921,6 +943,8 @@ function recomputeWeatherWarnFromLast() {
 }
 
 ipcRenderer.on('newConfig', (e, arg) => {
+    // 收到云端（或离线缓存）配置后，兜底显示逻辑不再需要介入
+    hasConfigFromCloud = true
     // 云端下发的配置仅在当前会话生效，不写入本地用户配置
     // 保留本地调试输入值，避免被云端配置覆盖
     if (arg && !('debug_input_value' in arg)) {
