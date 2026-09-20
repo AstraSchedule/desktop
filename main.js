@@ -160,7 +160,9 @@ function stripJsonComments(str) {
 function getUserConfigPath() {
     try {
         return path.join(app.getPath('userData'), 'scheduleConfig.user.jsonc')
-    } catch {
+    } catch (error) {
+        // 只记录错误类别：路径与配置内容都不进日志
+        console.warn('[Startup] Failed to resolve local user config path:', error?.code || error?.name || 'unknown error')
         return null
     }
 }
@@ -174,10 +176,13 @@ function readUserConfigSafe() {
         const cleaned = stripJsonComments(raw);
         try {
             return JSON.parse(cleaned)
-        } catch {
+        } catch (error) {
+            // 区分"没有本地配置"与"本地配置坏了"：后者此前完全静默
+            console.warn('[Startup] Failed to parse local user config:', error?.name || 'unknown error')
             return null
         }
-    } catch {
+    } catch (error) {
+        console.warn('[Startup] Failed to read local user config:', error?.code || error?.name || 'unknown error')
         return null
     }
 }
@@ -765,9 +770,11 @@ function loadScheduleFromCache(reason) {
         return false
     }
 
+    // 先落来源再改离线状态：setOfflineStatus 会在状态变化时同步触发托盘刷新，
+    // 顺序反了那次刷新会读到旧的 lastScheduleSource，提示就变成上一句
+    lastScheduleSource = 'cache'
     offlineCache.setOfflineStatus(true)
     lastScheduleConfig = cachedData.data
-    lastScheduleSource = 'cache'
     countdownState.scheduleCountdownRecords = Array.isArray(cachedData.data.countdown_records)
         ? cachedData.data.countdown_records
         : []
@@ -887,6 +894,15 @@ function getScheduleFromCloud() {
     request.on('response', (response) => {
         const statusCode = response.statusCode;
         console.log('getScheduleFromCloud response status:', statusCode);
+
+        // 已被更新请求取代的响应不得改动共享状态（离线标记、边缘限流退避）。
+        // 下面 end 里还有一道检查，两者覆盖不同的竞态窗口：这里防的是"响应头已到、
+        // 期间又发起了新请求"，那里防的是"读响应体期间被取代"
+        if (mySeq !== scheduleFetchSeq) {
+            console.warn('[Schedule] Discard stale response before handling: superseded by a newer request')
+            response.resume()
+            return;
+        }
 
         // 处理 304 状态码
         if (statusCode === 304) {
