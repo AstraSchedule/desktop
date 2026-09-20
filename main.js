@@ -354,6 +354,12 @@ function scheduleReconnect() {
 let websocketDisabled = false; // 全局标志，表示 WebSocket 是否被禁用
 let currentConnectionState = false; // 全局标志，记录当前连接状态
 
+// 数据来自本地离线缓存时，在托盘提示里补充来源说明。
+// 离线标志不再画在窗口里，状态统一在托盘图标悬停提示中体现
+function offlineTraySuffix() {
+    return offlineCache.getOfflineStatus().isOffline ? '\n数据来源: 本地离线缓存（云端暂不可用）' : '';
+}
+
 function updateTrayTooltip(connected, forceGreen) {
     // 无论 tray 是否存在，都更新全局状态
     currentConnectionState = connected;
@@ -370,10 +376,15 @@ function updateTrayTooltip(connected, forceGreen) {
         statusText = connected ? '在线' : '离线';
     }
 
-    let tooltipText = `${baseTooltip} - 状态: ${statusText}`;
+    const tooltipText = `${baseTooltip} - 状态: ${statusText}${offlineTraySuffix()}`;
 
     tray.setToolTip(tooltipText);
     console.log('[Main] Tray tooltip updated to:', tooltipText);
+}
+
+// 离线状态一变化就刷新托盘提示，无需等下一次连接状态变化
+offlineCache.onStatusChange = () => {
+    if (tray) updateTrayTooltip(currentConnectionState, websocketDisabled);
 }
 
 // 断开 WebSocket 连接并停止重连机制
@@ -578,6 +589,26 @@ function showMainWindow() {
     win.webContents.send('showMainWindow')
 }
 
+// 拿到第一份配置后按 startup_behavior 决定窗口行为，云端配置与本地缓存共用。
+// 返回 true 表示已安排退出应用，调用方不应再继续刷新其它窗口。
+function applyStartupBehavior(config, source) {
+    if (!isFromCloud) return false
+    const startupBehavior = config?.startup_behavior || 'normal'
+    countdownState.startupBehavior = startupBehavior
+    console.log(`[Startup] startup_behavior=${startupBehavior} (${source})`)
+    if (startupBehavior === 'exit') {
+        console.log('[Startup] startup_behavior is exit, quitting app...')
+        app.quit()
+        return true
+    }
+    if (startupBehavior === 'normal') {
+        showMainWindow()
+    } else if (startupBehavior === 'stay' && win && !win.isDestroyed()) {
+        win.hide()
+    }
+    return false
+}
+
 function setAutoLaunch() {
     const shortcutName = '星程(请勿重命名).lnk'
     app.setLoginItemSettings({ // backward compatible
@@ -709,6 +740,38 @@ function checkNetworkConnection() {
     })
 }
 
+// 云端不可用时回落到本地缓存。只在还没有任何可用配置时才使用
+// （冷启动、或首次拉取就失败），避免用旧缓存覆盖正在显示的课表。
+function loadScheduleFromCache(reason) {
+    if (lastScheduleConfig) return false
+    if (!offlineCache.hasCachedData()) {
+        console.log(`[OfflineCache] No cached schedule to fall back to (${reason})`)
+        return false
+    }
+    const cachedData = offlineCache.loadFromCache()
+    if (!cachedData?.data) {
+        console.warn(`[OfflineCache] Cached schedule is unreadable (${reason})`)
+        return false
+    }
+
+    offlineCache.setOfflineStatus(true)
+    lastScheduleConfig = cachedData.data
+    countdownState.scheduleCountdownRecords = Array.isArray(cachedData.data.countdown_records)
+        ? cachedData.data.countdown_records
+        : []
+    if (win && !win.isDestroyed()) win.webContents.send('newConfig', cachedData.data)
+    // 自动客户端配置规则同样要生效（与云端成功路径一致），否则离线启动时
+    // 窗口置顶/上课隐藏/始终缩小/课上倒计时整套规则失效，静默退回本地设置。
+    // 规则只驱动窗口与托盘行为、不触发课表拉取，因此不会构成配置下发的自激回路。
+    clientConfig.updateFromSchedule(cachedData.data)
+    console.log(`[OfflineCache] Loaded schedule from cache (${reason})`)
+
+    if (applyStartupBehavior(cachedData.data, 'cache')) return true
+    refreshCountdownWindow('offline-cache').catch(() => {
+    })
+    return true
+}
+
 // 重试获取课表数据的辅助函数
 async function getScheduleFromCloudWithRetry(maxRetries = 10) {
     for (let i = 0; i < maxRetries; i++) {
@@ -728,16 +791,8 @@ async function getScheduleFromCloudWithRetry(maxRetries = 10) {
     console.error('[Network] Failed to establish network connection after', maxRetries, 'attempts')
 
     // 尝试从本地缓存加载课表数据（离线模式）
-    if (offlineCache.hasCachedData()) {
-        console.log('[Network] Loading schedule from local cache (offline mode)')
-        const cachedData = offlineCache.loadFromCache()
-        if (cachedData?.data) {
-            offlineCache.setOfflineStatus(true)
-            if (win && !win.isDestroyed()) win.webContents.send('newConfig', cachedData.data)
-            lastScheduleConfig = cachedData.data
-            console.log('[Network] Successfully loaded schedule from cache')
-            return false
-        }
+    if (loadScheduleFromCache('network-unreachable')) {
+        return false
     }
 
     // 即使没有缓存数据，也继续尝试获取课表（可能在移动网络等不稳定情况下）
@@ -796,6 +851,9 @@ function getScheduleFromCloud() {
 
         if (statusCode < 200 || statusCode >= 300) {
             console.error('getScheduleFromCloud request failed with status:', statusCode);
+            // 403（限流）等非 2xx 同样属于云端不可用：冷启动时必须回落到本地缓存，
+            // 否则课表会一直空着（原先只有「连不上主机」才会用缓存）
+            loadScheduleFromCache(`http-${statusCode}`)
             offlineCache.setOfflineStatus(true)
             scheduleFetchRetry(mySeq)
             return;
@@ -864,19 +922,8 @@ function getScheduleFromCloud() {
                 offlineCache.setOfflineStatus(false)
 
                 // 根据 startup_behavior 决定窗口行为
-                if (isFromCloud) {
-                    const startupBehavior = scheduleConfigSync.startup_behavior || 'normal'
-                    countdownState.startupBehavior = startupBehavior
-                    console.log(`[Startup] startup_behavior=${startupBehavior}`)
-                    if (startupBehavior === 'exit') {
-                        console.log('[Startup] startup_behavior is exit, quitting app...')
-                        app.quit()
-                        return
-                    } else if (startupBehavior === 'normal') {
-                        showMainWindow()
-                    } else if (startupBehavior === 'stay') {
-                        if (win && !win.isDestroyed()) win.hide()
-                    }
+                if (applyStartupBehavior(scheduleConfigSync, 'cloud')) {
+                    return
                 }
 
                 refreshCountdownWindow('schedule-sync').catch(() => {
@@ -890,6 +937,7 @@ function getScheduleFromCloud() {
     })
     request.on('error', (err) => {
         console.error('getScheduleFromCloud request error:', err)
+        loadScheduleFromCache('request-error')
         offlineCache.setOfflineStatus(true)
         // 不显示错误弹窗，仅记录错误
         scheduleFetchRetry(mySeq)
@@ -915,6 +963,11 @@ app.whenReady().then(() => {
         win.webContents.send('getWeekIndex');
         if (lastScheduleConfig) {
             win.webContents.send('newConfig', lastScheduleConfig)
+        }
+        // 页面默认 display:none，只有收到 showMainWindow 才显示；
+        // 首次拉取（尤其是离线回落到缓存）可能早于渲染进程注册监听，这里补发一次
+        if (hasShownWindow) {
+            win.webContents.send('showMainWindow')
         }
     })
     // powerMonitor 事件无 preventDefault
@@ -964,6 +1017,9 @@ ipcMain.on('getWeekIndex', (e, arg) => {
         }
     }
     tray = new Tray(asset('image', store.get('trayIcon', 'icon') + '.png'))
+    // 立即按当前状态初始化提示：离线启动时不会有 WS 事件来触发刷新，
+    // 而离线判定往往早于托盘创建，onStatusChange 那次刷新会被 tray 为空挡掉
+    updateTrayTooltip(currentConnectionState, websocketDisabled)
     template = [
         {
             label: '连接云端',
@@ -1404,6 +1460,7 @@ ipcMain.on('update-tray-status', (e, arg) => {
         if (forceGreen) {
             tooltipText += '\n服务端正处于轻量 Serverless 模式，数据更新可能延迟';
         }
+        tooltipText += offlineTraySuffix();
 
         tray.setToolTip(tooltipText);
         console.log('[Main] Tray tooltip updated to:', tooltipText);
