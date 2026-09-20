@@ -820,13 +820,18 @@ let scheduleFetchSeq = 0
 // 课表拉取失败重试的退避参数：服务端异常或离线时避免长期按固定间隔高频重试
 const SCHEDULE_RETRY_BASE_DELAY_MS = 5000
 const SCHEDULE_RETRY_MAX_DELAY_MS = 60000
-// 边缘节点（CDN/WAF，如阿里云 ESA）的速率限制按来源 IP 封禁，本站规则配置的封禁时长为 1 小时。
-// 命中时从 1 分钟起步、上限 1 小时（1m→2m→4m→…→60m）：若封禁即将结束可以较快恢复，
-// 而 1 小时窗口内总共只发出个位数请求，不会把规则再次喂起来
+// 边缘节点（CDN/WAF，如阿里云 ESA）的频次控制规则按来源 IP 封禁，本站配置的封禁时长为 1 小时。
+// 官方文档只说明"拦截封禁 10 秒–24 小时"，未说明封禁期间的新请求是否会重置计时，
+// 因此退避间隔必须最终超过封禁时长：即便边缘实现是"每次命中就重新计时"，
+// 客户端也不会把自己续成永久封禁（间隔 4 小时 > 封禁 1 小时，中间始终有可用窗口）。
+// 序列 1m → 4m → 16m → 64m → 4h → 4h…：1 小时内只探测 3 次，
+// 配置的 1 小时封禁若已到期，最迟在 64 分钟那次就能恢复
 const EDGE_BLOCK_RETRY_DELAY_MS = 60000
-const EDGE_BLOCK_MAX_RETRY_DELAY_MS = 3600000
+const EDGE_BLOCK_RETRY_FACTOR = 4
+const EDGE_BLOCK_MAX_RETRY_DELAY_MS = 14400000
 let scheduleRetryDelayMs = SCHEDULE_RETRY_BASE_DELAY_MS
-let scheduleRetryMaxDelayMs = SCHEDULE_RETRY_MAX_DELAY_MS
+// 当前是否处于边缘限流状态；非 0 时走上面那条更长的独立退避序列
+let edgeBlockRetryDelayMs = 0
 
 // 识别边缘节点（CDN/WAF）的拦截响应，例如阿里云 ESA 限流：
 // X-Tengine-Error: denied by http_ratelimit。
@@ -837,11 +842,24 @@ function edgeBlockReason(response) {
     return String(response.headers?.['x-tengine-error'] || '')
 }
 
+// 服务端恢复可达后把两条退避序列都复位
+function resetScheduleRetryBackoff() {
+    scheduleRetryDelayMs = SCHEDULE_RETRY_BASE_DELAY_MS
+    edgeBlockRetryDelayMs = 0
+}
+
+// 计算下一次重试的间隔：边缘限流走独立的更长序列，其它失败走普通退避
+function nextScheduleRetryDelay() {
+    if (edgeBlockRetryDelayMs) return edgeBlockRetryDelayMs
+    const delay = scheduleRetryDelayMs
+    scheduleRetryDelayMs = Math.min(delay * 2, SCHEDULE_RETRY_MAX_DELAY_MS)
+    return delay
+}
+
 // 仅最新请求允许安排重试；被替代的请求不得发起后续请求（调度时与执行时双重校验）
 function scheduleFetchRetry(mySeq) {
     if (mySeq !== scheduleFetchSeq) return
-    const delay = scheduleRetryDelayMs
-    scheduleRetryDelayMs = Math.min(delay * 2, scheduleRetryMaxDelayMs)
+    const delay = nextScheduleRetryDelay()
     // 把实际退避间隔写进日志：边缘限流时会拉长到分钟/小时级，便于判断是被封还是真离线
     console.log(`[Schedule] Next retry in ${Math.round(delay / 1000)}s`)
     setTimeout(() => {
@@ -876,8 +894,7 @@ function getScheduleFromCloud() {
             // 能拿到 304 说明服务端可达：离线状态与失败退避都要复位，
             // 否则「离线期间服务端无改动 → 恢复后首个请求命中 304」会让客户端一直显示离线
             offlineCache.setOfflineStatus(false)
-            scheduleRetryDelayMs = SCHEDULE_RETRY_BASE_DELAY_MS
-            scheduleRetryMaxDelayMs = SCHEDULE_RETRY_MAX_DELAY_MS
+            resetScheduleRetryBackoff()
             return;
         }
 
@@ -885,8 +902,9 @@ function getScheduleFromCloud() {
             const edgeBlock = edgeBlockReason(response)
             if (edgeBlock) {
                 console.error(`getScheduleFromCloud blocked by edge node: status=${statusCode}, ${edgeBlock}`)
-                scheduleRetryMaxDelayMs = EDGE_BLOCK_MAX_RETRY_DELAY_MS
-                scheduleRetryDelayMs = Math.max(scheduleRetryDelayMs, EDGE_BLOCK_RETRY_DELAY_MS)
+                edgeBlockRetryDelayMs = edgeBlockRetryDelayMs
+                    ? Math.min(edgeBlockRetryDelayMs * EDGE_BLOCK_RETRY_FACTOR, EDGE_BLOCK_MAX_RETRY_DELAY_MS)
+                    : EDGE_BLOCK_RETRY_DELAY_MS
             } else {
                 console.error('getScheduleFromCloud request failed with status:', statusCode);
             }
@@ -911,9 +929,8 @@ function getScheduleFromCloud() {
                     console.warn('[Schedule] Discard stale response: superseded by a newer request')
                     return
                 }
-                // 服务端可达，重置失败重试退避
-                scheduleRetryDelayMs = SCHEDULE_RETRY_BASE_DELAY_MS
-                scheduleRetryMaxDelayMs = SCHEDULE_RETRY_MAX_DELAY_MS
+                // 服务端可达，重置失败重试退避（含边缘限流的独立序列）
+                resetScheduleRetryBackoff()
 
                 // 检查返回的 JSON 中是否含有 version 键
                 if (scheduleConfigSync.version !== undefined) {
