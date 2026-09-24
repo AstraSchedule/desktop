@@ -643,6 +643,22 @@ function isSemver(v) {
     return /^\d+\.\d+\.\d+(?:[-+].*)?$/.test(String(v || ''))
 }
 
+// 是否为 Windows 10 或更高版本。Node 在 Windows 上 os.release() 返回内核版本：
+// Win10/Win11 均为 10.x，Win8.1 为 6.3，Win7 为 6.1。新版本 Electron 只支持 Win10+，
+// 分叉构建据此判断是否可以切换到 Win10+ 更新通道。
+function isWindows10OrNewer() {
+    if (process.platform !== 'win32') return false
+    const major = Number.parseInt(String(os.release()).split('.')[0], 10)
+    return Number.isFinite(major) && major >= 10
+}
+
+// 默认更新源地址（latest.yml / win10.yml 与安装包所在目录）- 适配 GitHub 最新发布路径
+const DEFAULT_UPDATE_MIRROR = 'https://hubproxy.khbit.cn/https://github.com/daizihan233/AstraSchedule/releases/latest/download'
+// 分叉构建的两个更新通道：两个构建共用同一个 release 与版本号，只是元数据文件名不同
+// - 默认通道 latest.yml：Win7/8.1 兼容构建（旧版 Electron）
+// - Win10+ 通道 win10.yml：新版本 Electron 构建
+const WIN10_UPDATE_CHANNEL = 'win10'
+
 // 自动更新设置（仅打包且版本为 semver 时生效）
 let updaterInitialized = false
 function setupAutoUpdater() {
@@ -659,14 +675,23 @@ function setupAutoUpdater() {
         }
         if (updaterInitialized) return
         const { autoUpdater } = require('electron-updater')
-        // 默认镜像地址（latest.yml 与安装包所在目录）- 适配 GitHub 最新发布路径
-        const defaultMirror = 'https://hubproxy.khbit.cn/https://github.com/daizihan233/AstraSchedule/releases/latest/download'
         let updateBaseUrl = store.get('updateBaseUrl')
+        let usingDefaultSource = false
         if (!updateBaseUrl || typeof updateBaseUrl !== 'string' || updateBaseUrl.trim().length === 0) {
-            updateBaseUrl = defaultMirror
+            updateBaseUrl = DEFAULT_UPDATE_MIRROR
             store.set('updateBaseUrl', updateBaseUrl)
+            usingDefaultSource = true
+        } else {
+            usingDefaultSource = updateBaseUrl.trim() === DEFAULT_UPDATE_MIRROR
         }
         autoUpdater.setFeedURL({ provider: 'generic', url: updateBaseUrl.trim() })
+        // 分叉构建：仍在使用默认更新源、且当前系统支持新版本 Electron 时，切换到 Win10+ 通道
+        // （同一下载目录下的 win10.yml），让用户升级到新依赖的构建而不是一直停留在 Win7 兼容版。
+        // 用户自行配置过更新源时不干预，每次启动重新判定，因此不持久化通道选择。
+        if (usingDefaultSource && isWindows10OrNewer()) {
+            console.log('[Updater] Windows 10+ detected, switching to win10+ update channel')
+            autoUpdater.channel = WIN10_UPDATE_CHANNEL
+        }
         autoUpdater.autoDownload = true
         autoUpdater.autoInstallOnAppQuit = true
         autoUpdater.allowPrerelease = true
