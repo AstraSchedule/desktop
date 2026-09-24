@@ -117,6 +117,9 @@ const CLIENT_CONFIG_CHANNELS = {
 }
 
 function applyClientConfigSetting(key, value, fromRule) {
+    // 托盘勾选跟随「求值结果」，与 IPC 是否投递成功无关：先同步，
+    // 避免窗口不可用或页面未就绪时的提前 return/throw 把它一起跳过
+    syncTrayCheckbox(key, Boolean(value), fromRule)
     if (key === 'isWindowAlwaysOnTop') {
         if (win && !win.isDestroyed()) {
             if (value) win.setAlwaysOnTop(true, 'screen-saver', 9999999999999)
@@ -132,7 +135,6 @@ function applyClientConfigSetting(key, value, fromRule) {
             win.webContents.send(channel, Boolean(value))
         }
     }
-    syncTrayCheckbox(key, Boolean(value), fromRule)
 }
 
 // 托盘里的勾选状态跟随实际生效值；被自动任务接管的项置灰，避免用户误以为点了会生效

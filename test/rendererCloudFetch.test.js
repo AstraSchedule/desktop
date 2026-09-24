@@ -57,19 +57,27 @@ function baseConfig() {
 function setup() {
     const clock = createClock(FIXED_NOW)
     const ipc = createIpcStub()
+    // 捕获 DOMContentLoaded 回调：默认 fixture 把 addEventListener 设成空实现，
+    // 无法验证「初始化后回放暂存配置」这条真实路径
+    const domReadyListeners = []
     const {context} = loadRendererScripts({
         clock,
         storage: createStorage(),
         config: baseConfig(),
         ipc,
         weekIndex: 0,
-        sandbox: {$: JQUERY_STUB}
+        sandbox: {
+            $: JQUERY_STUB,
+            addEventListener: (type, callback) => {
+                if (type === 'DOMContentLoaded') domReadyListeners.push(callback)
+            }
+        }
     })
     vm.runInContext(DRAWING_STUBS, context)
     // 先跑一帧建立基线，后续断言只看新增消息
     vm.runInContext('tick()', context)
     ipc.sent.length = 0
-    return {clock, ipc, context}
+    return {clock, ipc, context, domReadyListeners}
 }
 
 function countChannel(ipc, channel) {
@@ -135,19 +143,28 @@ test('云端配置下发不自激拉取课表，但必须顺带请求天气', ()
 // 启动竞速回归：云端配置可能早于 DOM 就绪（root 尚未绑定）送达。
 // 历史缺陷：此时直接应用会在 root.style 上空引用抛错，而 hasConfigFromCloud 已置真，
 // 配置既没生效、也不会再走 8s 兜底显示，窗口停在默认画面上。
-test('DOM 未就绪时 newConfig 暂存而不丢失配置', () => {
-    const {ipc, context} = setup()
+test('DOM 未就绪时 newConfig 暂存，DOMContentLoaded 后回放', async () => {
+    const {ipc, context, domReadyListeners} = setup()
+    assert.strictEqual(domReadyListeners.length, 1, '应注册 DOMContentLoaded 回调')
 
     assert.strictEqual(vm.runInContext('root', context), null, '初始化前 root 尚未绑定')
-    assert.doesNotThrow(() => ipc.handlers.get('newConfig')({}, baseConfig()), '配置早到不得抛错')
+    assert.doesNotThrow(
+        () => ipc.handlers.get('newConfig')({}, {...baseConfig(), week_display: true}),
+        '配置早到不得抛错'
+    )
     assert.strictEqual(vm.runInContext('hasConfigFromCloud', context), true, '配置送达后兜底显示不再介入')
     assert.strictEqual(vm.runInContext('pendingNewConfig !== null', context), true, '配置应被暂存')
 
-    // DOM 就绪（root 绑定）后再送达的配置立即应用，暂存位清空
-    vm.runInContext('root = {style: {setProperty() {}}}; classContainer = {}', context)
-    ipc.handlers.get('newConfig')({}, baseConfig())
+    // 只隔离 DOM 初始化，回放接线走真实代码：删掉回放逻辑本用例必须失败
+    vm.runInContext(
+        'root = {style: {setProperty() {}}}; classContainer = {}; initDomAndStart = async () => {}',
+        context
+    )
+    domReadyListeners[0]()
+    await new Promise((resolve) => setImmediate(resolve))
 
-    assert.strictEqual(vm.runInContext('pendingNewConfig === null', context), true)
+    assert.strictEqual(vm.runInContext('pendingNewConfig === null', context), true, '回放后应清空暂存位')
+    assert.strictEqual(vm.runInContext('scheduleConfig.week_display', context), true, '暂存的配置应已应用')
     assert.strictEqual(countChannel(ipc, 'getScheduleFromCloud'), 0, '应用配置本身不得自激拉取')
 })
 
