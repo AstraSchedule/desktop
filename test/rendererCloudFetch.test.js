@@ -170,16 +170,20 @@ test('DOM 未就绪时 newConfig 暂存，DOMContentLoaded 后回放', async () 
 
 // 揭示时序回归：showMainWindow 必须先把「上课隐藏/始终缩小」的可见状态算出来再显示，
 // 否则会先画出未应用隐藏规则的画面、下一秒的 tick 再把它藏掉（"闪一下又消失"）。
-test('揭示窗口时立即应用可见状态，不留下会闪的中间态', () => {
+// 同时必须重算位置：setCountdownerContent 会让倒计时框重新可见，而 tick 只在日程变化时
+// 才重算坐标，漏掉就会把框显示在旧坐标上（历史缺陷：倒计时框压在日程行上）。
+test('揭示窗口时立即收敛可见状态与位置，不留下会闪或错位的中间态', () => {
     const {ipc, context} = setup()
 
     vm.runInContext(
-        'root = {style: {display: null}}; revealCalls = 0; ' +
-        'setCountdownerContent = () => { revealCalls++ }',
+        'root = {style: {display: null}}; revealCalls = 0; positionCalls = 0; ' +
+        'setCountdownerContent = () => { revealCalls++ }; ' +
+        'setCountdownerPosition = () => { positionCalls++ }',
         context
     )
     ipc.handlers.get('showMainWindow')({})
 
     assert.strictEqual(vm.runInContext('root.style.display', context), 'block')
-    assert.strictEqual(context.revealCalls, 1, '揭示时应同步收敛到终态')
+    assert.strictEqual(context.revealCalls, 1, '揭示时应同步收敛可见状态')
+    assert.strictEqual(context.positionCalls, 1, '揭示时必须重算坐标，否则会停在旧位置')
 })

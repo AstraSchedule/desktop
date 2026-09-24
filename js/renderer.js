@@ -642,6 +642,14 @@ async function initDomAndStart() {
     // 启动心跳渲染（在合并配置后再启动）
     scheduleNextTick();
 
+    // 自备字体（@font-face）加载完成后行高会变，而位置是在字体到位前测量的：
+    // 字体就绪后再收敛一次，消除冷启动「框压在行上」的竞态
+    if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(() => applyVisibilityState()).catch((e) => {
+            console.error('[Show] fonts ready hook failed:', e)
+        })
+    }
+
     // 确保当前连接状态的颜色被正确应用
     if (wsConnected !== undefined) {
         updateUIColorsForConnectionStatus(wsConnected);
@@ -691,10 +699,15 @@ let pendingNewConfig = null
 
 // 可见状态（上课隐藏/始终缩小/上课倒计时）最终由 setCountdownerContent 决定：
 // 揭示窗口、配置生效后都必须立刻收敛到终态，否则中间态会先画出来，
-// 下一秒的 tick 再把它藏掉——表现为启动时"闪一下又消失"
+// 下一秒的 tick 再把它藏掉——表现为启动时"闪一下又消失"。
+// 注意：setCountdownerContent 会把倒计时框重新显示出来，必须紧跟 setCountdownerPosition
+// 重算坐标。只有它写 left/top，而 tick 只在日程变化时才重算（renderer.js tick），
+// 少了这一步就会把框显示在上一次测量出的旧坐标上（例如行容器隐藏时量到的 0 偏移），
+// 表现为倒计时框压在日程行上
 function applyVisibilityState() {
     try {
         setCountdownerContent()
+        setCountdownerPosition()
     } catch (e) {
         console.error('[Show] Failed to apply visibility state:', e)
     }
