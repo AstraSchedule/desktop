@@ -131,3 +131,38 @@ test('云端配置下发不自激拉取课表，但必须顺带请求天气', ()
     // 一旦被一起掐掉，客户端启动后会一直显示默认的 000℃
     assert.ok(countChannel(ipc, 'getWeather') >= 1, '配置下发触发的重绘必须请求天气')
 })
+
+// 启动竞速回归：云端配置可能早于 DOM 就绪（root 尚未绑定）送达。
+// 历史缺陷：此时直接应用会在 root.style 上空引用抛错，而 hasConfigFromCloud 已置真，
+// 配置既没生效、也不会再走 8s 兜底显示，窗口停在默认画面上。
+test('DOM 未就绪时 newConfig 暂存而不丢失配置', () => {
+    const {ipc, context} = setup()
+
+    assert.strictEqual(vm.runInContext('root', context), null, '初始化前 root 尚未绑定')
+    assert.doesNotThrow(() => ipc.handlers.get('newConfig')({}, baseConfig()), '配置早到不得抛错')
+    assert.strictEqual(vm.runInContext('hasConfigFromCloud', context), true, '配置送达后兜底显示不再介入')
+    assert.strictEqual(vm.runInContext('pendingNewConfig !== null', context), true, '配置应被暂存')
+
+    // DOM 就绪（root 绑定）后再送达的配置立即应用，暂存位清空
+    vm.runInContext('root = {style: {setProperty() {}}}; classContainer = {}', context)
+    ipc.handlers.get('newConfig')({}, baseConfig())
+
+    assert.strictEqual(vm.runInContext('pendingNewConfig === null', context), true)
+    assert.strictEqual(countChannel(ipc, 'getScheduleFromCloud'), 0, '应用配置本身不得自激拉取')
+})
+
+// 揭示时序回归：showMainWindow 必须先把「上课隐藏/始终缩小」的可见状态算出来再显示，
+// 否则会先画出未应用隐藏规则的画面、下一秒的 tick 再把它藏掉（"闪一下又消失"）。
+test('揭示窗口时立即应用可见状态，不留下会闪的中间态', () => {
+    const {ipc, context} = setup()
+
+    vm.runInContext(
+        'root = {style: {display: null}}; revealCalls = 0; ' +
+        'setCountdownerContent = () => { revealCalls++ }',
+        context
+    )
+    ipc.handlers.get('showMainWindow')({})
+
+    assert.strictEqual(vm.runInContext('root.style.display', context), 'block')
+    assert.strictEqual(context.revealCalls, 1, '揭示时应同步收敛到终态')
+})

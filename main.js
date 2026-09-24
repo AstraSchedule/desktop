@@ -124,7 +124,13 @@ function applyClientConfigSetting(key, value, fromRule) {
         }
     } else {
         const channel = CLIENT_CONFIG_CHANNELS[key]
-        if (channel && win && !win.isDestroyed()) win.webContents.send(channel, Boolean(value))
+        if (channel) {
+            if (!win || win.isDestroyed() || !win.webContents || win.webContents.isDestroyed()) return
+            // 页面未加载完时 webContents.send 会被静默丢弃。必须抛错让调用方不要记账：
+            // clientConfig 一旦记下「已下发」，值不变时就永远不会重发，渲染进程会永久停在默认值
+            if (win.webContents.isLoading()) throw new Error('renderer not ready for ' + channel)
+            win.webContents.send(channel, Boolean(value))
+        }
     }
     syncTrayCheckbox(key, Boolean(value), fromRule)
 }
@@ -1056,6 +1062,9 @@ app.whenReady().then(() => {
         if (hasShownWindow) {
             win.webContents.send('showMainWindow')
         }
+        // 自动客户端配置（上课隐藏/始终缩小/上课倒计时/窗口置顶）同样只在首次拉取时下发一次，
+        // 早于页面就绪的那次会被丢弃且不会重试（值没变即跳过），这里按当前生效值强制重推
+        clientConfig.recompute(true)
     })
     // powerMonitor 事件无 preventDefault
     electron.powerMonitor.on('suspend', () => {
