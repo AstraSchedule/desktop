@@ -131,7 +131,12 @@ function applyClientConfigSetting(key, value, fromRule) {
             if (!win || win.isDestroyed() || !win.webContents || win.webContents.isDestroyed()) return
             // 页面未加载完时 webContents.send 会被静默丢弃。必须抛错让调用方不要记账：
             // clientConfig 一旦记下「已下发」，值不变时就永远不会重发，渲染进程会永久停在默认值
-            if (win.webContents.isLoading()) throw new Error('renderer not ready for ' + channel)
+            if (win.webContents.isLoading()) {
+                // 启动竞速下这是「预期」而不是故障：带错误码抛出，让调用方按原因分级记录
+                const notReady = new Error('renderer not ready for ' + channel)
+                notReady.code = 'RENDERER_NOT_READY'
+                throw notReady
+            }
             win.webContents.send(channel, Boolean(value))
         }
     }
@@ -1064,8 +1069,12 @@ app.whenReady().then(() => {
         if (hasShownWindow) {
             win.webContents.send('showMainWindow')
         }
-        // 自动客户端配置（上课隐藏/始终缩小/上课倒计时/窗口置顶）同样只在首次拉取时下发一次，
-        // 早于页面就绪的那次会被丢弃且不会重试（值没变即跳过），这里按当前生效值强制重推
+    })
+    // 自动客户端配置（上课隐藏/始终缩小/上课倒计时/窗口置顶）同样只在首次拉取时下发一次，
+    // 早于页面就绪的那次会被丢弃且不会重试（值没变即跳过），这里按当前生效值强制重推。
+    // 必须挂 did-stop-loading：did-finish-load 触发时 webContents.isLoading() 仍为 true，
+    // 挂那里会被「渲染进程未就绪」挡掉，只能退回 20s tick 兜底
+    win.webContents.on('did-stop-loading', () => {
         clientConfig.recompute(true)
     })
     // powerMonitor 事件无 preventDefault
