@@ -116,6 +116,19 @@ const CLIENT_CONFIG_CHANNELS = {
     isDuringClassCountdown: 'ClassCountdown'
 }
 
+// 把生效值下发到渲染进程。页面未加载完时 webContents.send 会被静默丢弃，
+// 必须抛错让调用方不要记账：clientConfig 一旦记下「已下发」，值不变时就永远不会重发，
+// 渲染进程会永久停在默认值；带错误码是为了让调用方按预期/故障分级记录
+function pushRendererSetting(channel, value) {
+    if (!win || win.isDestroyed() || !win.webContents || win.webContents.isDestroyed()) return
+    if (win.webContents.isLoading()) {
+        const notReady = new Error('renderer not ready for ' + channel)
+        notReady.code = 'RENDERER_NOT_READY'
+        throw notReady
+    }
+    win.webContents.send(channel, Boolean(value))
+}
+
 function applyClientConfigSetting(key, value, fromRule) {
     // 托盘勾选跟随「求值结果」，与 IPC 是否投递成功无关：先同步，
     // 避免窗口不可用或页面未就绪时的提前 return/throw 把它一起跳过
@@ -125,21 +138,10 @@ function applyClientConfigSetting(key, value, fromRule) {
             if (value) win.setAlwaysOnTop(true, 'screen-saver', 9999999999999)
             else win.setAlwaysOnTop(false)
         }
-    } else {
-        const channel = CLIENT_CONFIG_CHANNELS[key]
-        if (channel) {
-            if (!win || win.isDestroyed() || !win.webContents || win.webContents.isDestroyed()) return
-            // 页面未加载完时 webContents.send 会被静默丢弃。必须抛错让调用方不要记账：
-            // clientConfig 一旦记下「已下发」，值不变时就永远不会重发，渲染进程会永久停在默认值
-            if (win.webContents.isLoading()) {
-                // 启动竞速下这是「预期」而不是故障：带错误码抛出，让调用方按原因分级记录
-                const notReady = new Error('renderer not ready for ' + channel)
-                notReady.code = 'RENDERER_NOT_READY'
-                throw notReady
-            }
-            win.webContents.send(channel, Boolean(value))
-        }
+        return
     }
+    const channel = CLIENT_CONFIG_CHANNELS[key]
+    if (channel) pushRendererSetting(channel, value)
 }
 
 // 托盘里的勾选状态跟随实际生效值；被自动任务接管的项置灰，避免用户误以为点了会生效

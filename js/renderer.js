@@ -644,11 +644,9 @@ async function initDomAndStart() {
 
     // 自备字体（@font-face）加载完成后行高会变，而位置是在字体到位前测量的：
     // 字体就绪后再收敛一次，消除冷启动「框压在行上」的竞态
-    if (document.fonts && document.fonts.ready) {
-        document.fonts.ready.then(() => applyVisibilityState()).catch((e) => {
-            console.error('[Show] fonts ready hook failed:', e)
-        })
-    }
+    document.fonts?.ready?.then(() => applyVisibilityState()).catch((e) => {
+        console.error('[Show] fonts ready hook failed:', e)
+    })
 
     // 确保当前连接状态的颜色被正确应用
     if (wsConnected !== undefined) {
@@ -1023,7 +1021,7 @@ function applyNewConfig(arg) {
     }
     setBanner();
     // 配置可能晚于窗口揭示到达（异步）：立即按新配置收敛可见状态
-    if (root && root.style.display === 'block') {
+    if (root?.style.display === 'block') {
         applyVisibilityState()
     }
 }
