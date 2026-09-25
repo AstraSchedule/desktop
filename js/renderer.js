@@ -455,6 +455,7 @@ function tick(reset = false) {
             setCountdownerPosition()
         })
         setSidebar()
+        hasRenderedSchedule = true
         setBackgroundDisplay()
         // 天气与课表配置的触发条件不同，不能合并判断：天气不参与任何反馈回路，
         // 重绘时也要刷新。启动时云端配置往往早于第一次周期 tick 到达，天气请求正是搭在
@@ -481,7 +482,13 @@ function scheduleNextTick() {
     const now = Date.now();
     const delay = 1000 - (now % 1000);
     setTimeout(() => {
-        tick();
+        // tick 内部任何抛错都会让下一帧不再排队，界面会永久冻结在上一帧
+        // （表现为一直停在 HTML 占位「加载中」），所以单帧异常不得中断心跳
+        try {
+            tick();
+        } catch (e) {
+            console.error('[Tick] frame failed, heartbeat continues:', e);
+        }
         scheduleNextTick();
     }, delay);
 }
@@ -653,26 +660,22 @@ async function initDomAndStart() {
         updateUIColorsForConnectionStatus(wsConnected);
     }
 
-    // 兜底显示：迟迟拿不到任何配置（云端不可用且无本地缓存）时，按本地配置的启动行为
-    // 决定是否先把窗口显示出来。否则页面停在 css 的 :root{display:none}，
-    // 用户只看到一个托盘图标，既没有课表也没有任何提示，无从判断是"没数据"还是"没启动"
-    setTimeout(revealWindowWithoutConfig, CONFIG_WAIT_REVEAL_MS)
 }
 
-// 等待配置的宽限时间：超过它仍无配置就按本地 startup_behavior 兜底显示
-const CONFIG_WAIT_REVEAL_MS = 8000
-
-function revealWindowWithoutConfig() {
+// 云端确定不可用（主进程连续网络探测失败、且没有缓存可回放）时才按本地配置兜底显示，
+// 在此之前保持隐藏：没有真实数据时窗口不该出现（历史缺陷：露出 HTML 占位「加载中」）。
+// 不能用「首次请求失败」或 isOffline 之类的信号：那些发生时重试仍在排队，窗口会过早显示；
+// 有缓存的情况由主进程直接用缓存数据揭示（loadScheduleFromCache），无需这里的兜底。
+ipcRenderer.on('scheduleUnavailable', () => {
     if (hasConfigFromCloud) return
     const behavior = scheduleConfig?.startup_behavior || 'normal'
     if (behavior !== 'normal') {
-        console.log('[Startup] No schedule config yet, keep hidden by local startup_behavior:', behavior)
+        console.log('[Startup] Cloud unavailable, keep hidden by local startup_behavior:', behavior)
         return
     }
-    if (!root) return
-    console.log('[Startup] No schedule config yet, revealing window with local config')
+    console.log('[Startup] Cloud unavailable, revealing window with local config')
     revealMainWindow()
-}
+})
 
 globalThis.addEventListener('DOMContentLoaded', () => {
     initDomAndStart().then(() => {
@@ -711,12 +714,28 @@ function applyVisibilityState() {
     }
 }
 
+// 是否已经把课表渲染进 DOM（HTML 里的占位「加载中/Loading」是否已被替换）
+let hasRenderedSchedule = false
+
+// 揭示前必须保证课表已渲染，否则窗口会把 HTML 占位内容当数据展示给用户
+// （历史缺陷：云端还没响应就显示「加载中」）
+function ensureScheduleRendered() {
+    if (hasRenderedSchedule) return
+    scheduleData = getScheduleData()
+    setScheduleClass()
+    setSidebar()
+    // 只有整段渲染都成功才算渲染完成：中途抛错时必须保持为假，
+    // 否则后续揭示会跳过渲染，把占位内容当数据展示
+    hasRenderedSchedule = true
+}
+
 // 揭示即终态
 function revealMainWindow() {
     if (!root) {
         pendingShow = true
         return
     }
+    ensureScheduleRendered()
     root.style.display = 'block'
     applyVisibilityState()
 }
@@ -1011,6 +1030,7 @@ function applyNewConfig(arg) {
     scheduleData = getScheduleData();
     setScheduleClass()
     setSidebar()
+    hasRenderedSchedule = true
     // 配置变化也需应用覆盖规则
     // 若开启预警覆盖并切换了简略/详细模式，立即基于最近一次天气数据重算，避免等待下一次天气刷新
     if (scheduleConfig.weather_alert_override) {

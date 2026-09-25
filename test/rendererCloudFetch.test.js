@@ -54,7 +54,7 @@ function baseConfig() {
     }
 }
 
-function setup() {
+function setup(extraSandbox = {}) {
     const clock = createClock(FIXED_NOW)
     const ipc = createIpcStub()
     // 捕获 DOMContentLoaded 回调：默认 fixture 把 addEventListener 设成空实现，
@@ -70,7 +70,8 @@ function setup() {
             $: JQUERY_STUB,
             addEventListener: (type, callback) => {
                 if (type === 'DOMContentLoaded') domReadyListeners.push(callback)
-            }
+            },
+            ...extraSandbox
         }
     })
     vm.runInContext(DRAWING_STUBS, context)
@@ -186,4 +187,73 @@ test('揭示窗口时立即收敛可见状态与位置，不留下会闪或错�
     assert.strictEqual(vm.runInContext('root.style.display', context), 'block')
     assert.strictEqual(context.revealCalls, 1, '揭示时应同步收敛可见状态')
     assert.strictEqual(context.positionCalls, 1, '揭示时必须重算坐标，否则会停在旧位置')
+})
+
+// 心跳保活回归：tick 抛错后必须继续排下一帧，否则界面永久冻结在上一帧
+// （历史缺陷：没见过服务器响应，界面一直停在 HTML 占位「加载中」）。
+test('单帧异常不中断心跳', () => {
+    const timers = []
+    const {context} = setup({setTimeout: (fn) => { timers.push(fn); return timers.length }})
+    vm.runInContext('tick = () => { throw new Error("frame boom") }', context)
+
+    vm.runInContext('scheduleNextTick()', context)
+    assert.strictEqual(timers.length, 1, '应排出一帧')
+
+    assert.doesNotThrow(() => timers[0](), '单帧异常不得向外抛出')
+    assert.strictEqual(timers.length, 2, '出错后必须继续排下一帧')
+})
+
+// 占位内容不得当数据展示：揭示窗口前必须先渲染课表
+test('揭示窗口前先渲染课表，占位内容不当作数据展示', () => {
+    const {ipc, context} = setup()
+    // setup() 的基线 tick 已经渲染过一帧，这里复位标志以模拟「尚未渲染」的启动态
+    vm.runInContext(
+        'root = {style: {display: null}}; hasRenderedSchedule = false; renderCalls = 0; ' +
+        'setScheduleClass = () => { renderCalls++ }; setSidebar = () => {}',
+        context
+    )
+
+    ipc.handlers.get('showMainWindow')({})
+    assert.strictEqual(context.renderCalls, 1, '揭示前必须渲染一次课表')
+    assert.strictEqual(vm.runInContext('root.style.display', context), 'block')
+
+    ipc.handlers.get('showMainWindow')({})
+    assert.strictEqual(context.renderCalls, 1, '已渲染过就不必重复渲染')
+})
+
+// 揭示时机回归：只有主进程确认「云端不可用」后才兜底显示，其余时间保持隐藏。
+// 不能用首次请求失败 / isOffline 之类的信号：那些发生时重试仍在排队。
+test('收到云端不可用信号后才兜底显示，已有配置时不再兜底', () => {
+    const {ipc, context} = setup()
+    vm.runInContext('root = {style: {display: null}}', context)
+
+    const onUnavailable = ipc.handlers.get('scheduleUnavailable')
+    assert.strictEqual(typeof onUnavailable, 'function', '应注册云端不可用信号处理器')
+
+    onUnavailable({})
+    assert.strictEqual(vm.runInContext('root.style.display', context), 'block', '确认不可用后应兜底显示')
+
+    // 已有云端配置时不得再用本地配置兜底，否则会覆盖刚拿到的课表
+    const second = setup()
+    vm.runInContext('root = {style: {display: null}}; hasConfigFromCloud = true', second.context)
+    second.ipc.handlers.get('scheduleUnavailable')({})
+    assert.notStrictEqual(vm.runInContext('root.style.display', second.context), 'block', '已有配置时不得兜底')
+})
+
+// 渲染失败不得标记为已渲染：否则后续揭示会跳过渲染，把占位内容当数据展示
+test('渲染失败不得标记为已渲染，下次揭示仍会重试', () => {
+    const {ipc, context} = setup()
+    // setup() 的基线 tick 已经渲染过一帧，这里复位标志以模拟「尚未渲染」的启动态
+    vm.runInContext(
+        'root = {style: {display: null}}; hasRenderedSchedule = false; renderCalls = 0; failNext = true; ' +
+        'setScheduleClass = () => { renderCalls++ }; ' +
+        'setSidebar = () => { if (failNext) { failNext = false; throw new Error("sidebar boom") } }',
+        context
+    )
+
+    assert.throws(() => ipc.handlers.get('showMainWindow')({}), /sidebar boom/)
+    assert.strictEqual(context.renderCalls, 1, '第一次应尝试渲染')
+
+    ipc.handlers.get('showMainWindow')({})
+    assert.strictEqual(context.renderCalls, 2, '上次渲染失败，这次必须重新渲染')
 })

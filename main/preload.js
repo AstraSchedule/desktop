@@ -43,6 +43,7 @@ const ON_CHANNELS = new Set([
     'setCloudClass',
     'setCloudSec',
     'newConfig',
+    'scheduleUnavailable',
     'ClassCountdown',
     'ClassHidden',
     'AlwaysMinimized',
