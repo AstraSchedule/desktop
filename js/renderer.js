@@ -273,7 +273,6 @@ function changeScheduleClass(classHtml, inner) {
 }
 
 function setScheduleClass() {
-    hasRenderedSchedule = true;
     let classHtml = '';
     for (let i = 0; i < scheduleData.scheduleArray.length; i++) {
         let inner = scheduleData.scheduleArray[i]
@@ -456,6 +455,7 @@ function tick(reset = false) {
             setCountdownerPosition()
         })
         setSidebar()
+        hasRenderedSchedule = true
         setBackgroundDisplay()
         // 天气与课表配置的触发条件不同，不能合并判断：天气不参与任何反馈回路，
         // 重绘时也要刷新。启动时云端配置往往早于第一次周期 tick 到达，天气请求正是搭在
@@ -660,39 +660,22 @@ async function initDomAndStart() {
         updateUIColorsForConnectionStatus(wsConnected);
     }
 
-    // 兜底显示：迟迟拿不到任何配置（云端不可用且无本地缓存）时，按本地配置的启动行为
-    // 决定是否先把窗口显示出来。否则页面停在 css 的 :root{display:none}，
-    // 用户只看到一个托盘图标，既没有课表也没有任何提示，无从判断是"没数据"还是"没启动"
-    setTimeout(revealWindowWithoutConfig, CONFIG_WAIT_REVEAL_MS)
 }
 
-// 等待配置的宽限时间：超过它仍无配置就按本地 startup_behavior 兜底显示
-const CONFIG_WAIT_REVEAL_MS = 8000
-
-async function revealWindowWithoutConfig() {
+// 云端确定不可用（主进程连续网络探测失败、且没有缓存可回放）时才按本地配置兜底显示，
+// 在此之前保持隐藏：没有真实数据时窗口不该出现（历史缺陷：露出 HTML 占位「加载中」）。
+// 不能用「首次请求失败」或 isOffline 之类的信号：那些发生时重试仍在排队，窗口会过早显示；
+// 有缓存的情况由主进程直接用缓存数据揭示（loadScheduleFromCache），无需这里的兜底。
+ipcRenderer.on('scheduleUnavailable', () => {
     if (hasConfigFromCloud) return
     const behavior = scheduleConfig?.startup_behavior || 'normal'
     if (behavior !== 'normal') {
-        console.log('[Startup] No schedule config yet, keep hidden by local startup_behavior:', behavior)
-        return
-    }
-    if (!root) return
-    // 只有云端确实不可用（请求已失败）才用本地配置兜底显示；只要还在重试就继续等，
-    // 避免还没收到响应就把窗口显示出来（用户看到的是占位「加载中」而不是数据）
-    let offline = false
-    try {
-        offline = !!(await ipcRenderer.invoke('getOfflineStatus'))?.isOffline
-    } catch (e) {
-        console.error('[Startup] Failed to read offline status:', e)
-    }
-    if (!offline) {
-        console.log('[Startup] No schedule config yet, cloud still retrying, keep hidden')
-        setTimeout(revealWindowWithoutConfig, CONFIG_WAIT_REVEAL_MS)
+        console.log('[Startup] Cloud unavailable, keep hidden by local startup_behavior:', behavior)
         return
     }
     console.log('[Startup] Cloud unavailable, revealing window with local config')
     revealMainWindow()
-}
+})
 
 globalThis.addEventListener('DOMContentLoaded', () => {
     initDomAndStart().then(() => {
@@ -738,10 +721,12 @@ let hasRenderedSchedule = false
 // （历史缺陷：云端还没响应就显示「加载中」）
 function ensureScheduleRendered() {
     if (hasRenderedSchedule) return
-    hasRenderedSchedule = true
     scheduleData = getScheduleData()
     setScheduleClass()
     setSidebar()
+    // 只有整段渲染都成功才算渲染完成：中途抛错时必须保持为假，
+    // 否则后续揭示会跳过渲染，把占位内容当数据展示
+    hasRenderedSchedule = true
 }
 
 // 揭示即终态
@@ -1045,6 +1030,7 @@ function applyNewConfig(arg) {
     scheduleData = getScheduleData();
     setScheduleClass()
     setSidebar()
+    hasRenderedSchedule = true
     // 配置变化也需应用覆盖规则
     // 若开启预警覆盖并切换了简略/详细模式，立即基于最近一次天气数据重算，避免等待下一次天气刷新
     if (scheduleConfig.weather_alert_override) {

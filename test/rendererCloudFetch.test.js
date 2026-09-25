@@ -206,8 +206,9 @@ test('单帧异常不中断心跳', () => {
 // 占位内容不得当数据展示：揭示窗口前必须先渲染课表
 test('揭示窗口前先渲染课表，占位内容不当作数据展示', () => {
     const {ipc, context} = setup()
+    // setup() 的基线 tick 已经渲染过一帧，这里复位标志以模拟「尚未渲染」的启动态
     vm.runInContext(
-        'root = {style: {display: null}}; renderCalls = 0; ' +
+        'root = {style: {display: null}}; hasRenderedSchedule = false; renderCalls = 0; ' +
         'setScheduleClass = () => { renderCalls++ }; setSidebar = () => {}',
         context
     )
@@ -220,17 +221,39 @@ test('揭示窗口前先渲染课表，占位内容不当作数据展示', () =>
     assert.strictEqual(context.renderCalls, 1, '已渲染过就不必重复渲染')
 })
 
-// 揭示时机回归：云端还在重试时保持隐藏，确认不可用后才按本地配置兜底显示
-test('未确认云端不可用前保持隐藏，确认后才兜底显示', async () => {
-    const timers = []
-    const {ipc, context} = setup({setTimeout: (fn) => { timers.push(fn); return timers.length }})
+// 揭示时机回归：只有主进程确认「云端不可用」后才兜底显示，其余时间保持隐藏。
+// 不能用首次请求失败 / isOffline 之类的信号：那些发生时重试仍在排队。
+test('收到云端不可用信号后才兜底显示，已有配置时不再兜底', () => {
+    const {ipc, context} = setup()
     vm.runInContext('root = {style: {display: null}}', context)
 
-    await vm.runInContext('revealWindowWithoutConfig()', context)
-    assert.notStrictEqual(vm.runInContext('root.style.display', context), 'block', '还在重试不得抢先显示')
-    assert.strictEqual(timers.length, 1, '应继续等待下一次检查')
+    const onUnavailable = ipc.handlers.get('scheduleUnavailable')
+    assert.strictEqual(typeof onUnavailable, 'function', '应注册云端不可用信号处理器')
 
-    ipc.api.invoke = async () => ({isOffline: true})
-    await vm.runInContext('revealWindowWithoutConfig()', context)
+    onUnavailable({})
     assert.strictEqual(vm.runInContext('root.style.display', context), 'block', '确认不可用后应兜底显示')
+
+    // 已有云端配置时不得再用本地配置兜底，否则会覆盖刚拿到的课表
+    const second = setup()
+    vm.runInContext('root = {style: {display: null}}; hasConfigFromCloud = true', second.context)
+    second.ipc.handlers.get('scheduleUnavailable')({})
+    assert.notStrictEqual(vm.runInContext('root.style.display', second.context), 'block', '已有配置时不得兜底')
+})
+
+// 渲染失败不得标记为已渲染：否则后续揭示会跳过渲染，把占位内容当数据展示
+test('渲染失败不得标记为已渲染，下次揭示仍会重试', () => {
+    const {ipc, context} = setup()
+    // setup() 的基线 tick 已经渲染过一帧，这里复位标志以模拟「尚未渲染」的启动态
+    vm.runInContext(
+        'root = {style: {display: null}}; hasRenderedSchedule = false; renderCalls = 0; failNext = true; ' +
+        'setScheduleClass = () => { renderCalls++ }; ' +
+        'setSidebar = () => { if (failNext) { failNext = false; throw new Error("sidebar boom") } }',
+        context
+    )
+
+    assert.throws(() => ipc.handlers.get('showMainWindow')({}), /sidebar boom/)
+    assert.strictEqual(context.renderCalls, 1, '第一次应尝试渲染')
+
+    ipc.handlers.get('showMainWindow')({})
+    assert.strictEqual(context.renderCalls, 2, '上次渲染失败，这次必须重新渲染')
 })

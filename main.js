@@ -234,9 +234,12 @@ function astraRequest(options) {
         requestCert: false,
         rejectUnauthorized: true,
     })
-    request.setTimeout(ASTRA_REQUEST_TIMEOUT_MS, () => {
+    // 总时限必须从创建请求起算：request.setTimeout() 只在 socket 分配后才生效，
+    // 连接建立阶段（DNS/TCP/TLS）卡住时它永远不会触发，请求会一直挂着
+    const deadline = setTimeout(() => {
         request.destroy(new Error('astraRequest timeout'))
-    })
+    }, ASTRA_REQUEST_TIMEOUT_MS)
+    request.on('close', () => clearTimeout(deadline))
     return request
 }
 let classId = String(store.get("class", "39/2023/1"))
@@ -874,6 +877,10 @@ async function getScheduleFromCloudWithRetry(maxRetries = 10) {
     if (loadScheduleFromCache('network-unreachable')) {
         return false
     }
+
+    // 连续探测失败且没有缓存可用：这才是「云端确定不可用」，告知渲染进程可按本地配置兜底。
+    // 不能用首次请求失败当信号：那时重试仍在排队，窗口会过早显示占位内容
+    if (win && !win.isDestroyed()) win.webContents.send('scheduleUnavailable')
 
     // 即使没有缓存数据，也继续尝试获取课表（可能在移动网络等不稳定情况下）
     console.log('[Network] No cached data available, proceeding with schedule fetch despite network check failure')
