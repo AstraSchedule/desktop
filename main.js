@@ -667,6 +667,15 @@ function isWindows10OrNewer() {
     return Number.isFinite(major) && major >= 10
 }
 
+// 当前系统能否运行 x64 安装包（Win10+ 通道是 x64 构建）。当前发布的客户端是 ia32，
+// 运行在 64 位 Windows 上时环境变量 PROCESSOR_ARCHITEW6432 为 AMD64；32 位 Windows 上不存在该变量。
+// ARM64 的 Windows 10 没有 x64 模拟，保守处理：不切换通道，继续留在 ia32 兼容构建。
+function canRunX64Build() {
+    if (process.platform !== 'win32') return false
+    if (process.arch === 'x64') return true
+    return String(process.env.PROCESSOR_ARCHITEW6432 || '') === 'AMD64'
+}
+
 // 默认更新源地址（latest.yml / win10.yml 与安装包所在目录）- 适配 GitHub 最新发布路径
 const DEFAULT_UPDATE_MIRROR = 'https://hubproxy.khbit.cn/https://github.com/daizihan233/AstraSchedule/releases/latest/download'
 // 分叉构建的两个更新通道：两个构建共用同一个 release 与版本号，只是元数据文件名不同
@@ -700,12 +709,16 @@ function setupAutoUpdater() {
             usingDefaultSource = updateBaseUrl.trim() === DEFAULT_UPDATE_MIRROR
         }
         autoUpdater.setFeedURL({ provider: 'generic', url: updateBaseUrl.trim() })
-        // 分叉构建：仍在使用默认更新源、且当前系统支持新版本 Electron 时，切换到 Win10+ 通道
-        // （同一下载目录下的 win10.yml），让用户升级到新依赖的构建而不是一直停留在 Win7 兼容版。
+        // 分叉构建：仍在使用默认更新源、且当前系统为 Win10+ 并能运行 x64 安装包时，
+        // 切换到 Win10+ 通道（同一下载目录下的 win10.yml），让用户升级到新依赖的构建而不是
+        // 一直停留在 Win7 兼容版。32 位系统装不了 x64 包，必须留在 ia32 通道（CodeRabbit 意见 #2）。
         // 用户自行配置过更新源时不干预，每次启动重新判定，因此不持久化通道选择。
-        if (usingDefaultSource && isWindows10OrNewer()) {
-            console.log('[Updater] Windows 10+ detected, switching to win10+ update channel')
+        if (usingDefaultSource && isWindows10OrNewer() && canRunX64Build()) {
+            console.log('[Updater] Windows 10+ x64-capable detected, switching to win10+ update channel')
             autoUpdater.channel = WIN10_UPDATE_CHANNEL
+            // electron-updater 的 channel 赋值会把 allowDowngrade 置为 true（AppUpdater.js），
+            // 显式关闭：通道元数据滞后或代理返回旧 win10.yml 时不允许自动降级（CodeRabbit 意见 #3）
+            autoUpdater.allowDowngrade = false
         }
         autoUpdater.autoDownload = true
         autoUpdater.autoInstallOnAppQuit = true

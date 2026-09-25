@@ -6,8 +6,27 @@ on:
       - main
 
 jobs:
+  # 版本号只在这里计算一次，经 job output 提供给两个矩阵任务共用。
+  # 若各任务各自 Get-Date：跨午夜/月末或失败重跑时两次算出的日期不同，
+  # 两个通道会发布到不同的 release，而 electron-updater 只读最新 release，
+  # 导致其中一个通道找不到元数据、更新失败（CodeRabbit 意见 #1）。
+  version:
+    if: ${{ !startsWith(github.event.head_commit.message, 'docs') }}
+    runs-on: ubuntu-latest
+    outputs:
+      ver: ${{ steps.compute.outputs.ver }}
+    steps:
+      - id: compute
+        name: Compute rolling version
+        run: |
+          # 语义化版本：YYYYMM.D.N（均为数字且无前导零）
+          ym=$(date -u +%Y%m)
+          dd=$(date -u +%-d)
+          echo "ver=${ym}.$dd.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
   build_and_publish:
     name: Build & Publish (${{ matrix.channel }})
+    needs: version
     if: ${{ !startsWith(github.event.head_commit.message, 'docs') }}
     permissions:
       contents: write
@@ -57,11 +76,9 @@ jobs:
       - name: Prepare package.json (rolling version / electron / artifact names / channel)
         shell: pwsh
         run: |
-          # 语义化版本：YYYYMM.D.N（均为数字且无前导零）；两个通道共用同一次运行的版本号
-          $ym  = [int](Get-Date -Format 'yyyyMM')
-          $dd  = [int](Get-Date -Format 'dd')
-          $run = [int]${{ github.run_number }}
-          $ver = "$ym.$dd.$run"
+          # 语义化版本：YYYYMM.D.N，由 version 任务统一计算（见 needs.version.outputs.ver），
+          # 保证两个通道在任何情况下都拿到同一个版本号、发布到同一个 release
+          $ver = '${{ needs.version.outputs.ver }}'
 
           # Win10+ 通道动态取 npm 上的最新稳定版 Electron；Win7 通道固定 22.x
           $electron = '${{ matrix.electron }}'
