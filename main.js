@@ -213,6 +213,10 @@ function getServer() {
     return String(store.get('server', 'class.getastra.cn'))
 }
 
+// 单次请求的超时上限：超时即按失败处理，交给调用方沿用既有重试策略。
+// 没有它，半开连接会让「无响应」永远不收敛（天气请求中标志、兜底显示判定都会卡死）
+const ASTRA_REQUEST_TIMEOUT_MS = 20000
+
 // 统一 HTTP 请求，注入 User-Agent，不请求客户端证书（mTLS）
 function astraRequest(options) {
     const https = require('node:https')
@@ -221,7 +225,7 @@ function astraRequest(options) {
     const method = (typeof options === 'object' ? options.method : null) || 'GET'
     const headers = { 'User-Agent': ua, ...(typeof options === 'object' ? (options.headers || {}) : {}) }
     const parsed = new URL(url)
-    return https.request({
+    const request = https.request({
         hostname: parsed.hostname,
         port: parsed.port || 443,
         path: parsed.pathname + parsed.search,
@@ -230,6 +234,10 @@ function astraRequest(options) {
         requestCert: false,
         rejectUnauthorized: true,
     })
+    request.setTimeout(ASTRA_REQUEST_TIMEOUT_MS, () => {
+        request.destroy(new Error('astraRequest timeout'))
+    })
+    return request
 }
 let classId = String(store.get("class", "39/2023/1"))
 let isFromCloud = store.get('isFromCloud', false)

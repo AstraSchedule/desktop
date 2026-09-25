@@ -54,7 +54,7 @@ function baseConfig() {
     }
 }
 
-function setup() {
+function setup(extraSandbox = {}) {
     const clock = createClock(FIXED_NOW)
     const ipc = createIpcStub()
     // 捕获 DOMContentLoaded 回调：默认 fixture 把 addEventListener 设成空实现，
@@ -70,7 +70,8 @@ function setup() {
             $: JQUERY_STUB,
             addEventListener: (type, callback) => {
                 if (type === 'DOMContentLoaded') domReadyListeners.push(callback)
-            }
+            },
+            ...extraSandbox
         }
     })
     vm.runInContext(DRAWING_STUBS, context)
@@ -186,4 +187,50 @@ test('揭示窗口时立即收敛可见状态与位置，不留下会闪或错�
     assert.strictEqual(vm.runInContext('root.style.display', context), 'block')
     assert.strictEqual(context.revealCalls, 1, '揭示时应同步收敛可见状态')
     assert.strictEqual(context.positionCalls, 1, '揭示时必须重算坐标，否则会停在旧位置')
+})
+
+// 心跳保活回归：tick 抛错后必须继续排下一帧，否则界面永久冻结在上一帧
+// （历史缺陷：没见过服务器响应，界面一直停在 HTML 占位「加载中」）。
+test('单帧异常不中断心跳', () => {
+    const timers = []
+    const {context} = setup({setTimeout: (fn) => { timers.push(fn); return timers.length }})
+    vm.runInContext('tick = () => { throw new Error("frame boom") }', context)
+
+    vm.runInContext('scheduleNextTick()', context)
+    assert.strictEqual(timers.length, 1, '应排出一帧')
+
+    assert.doesNotThrow(() => timers[0](), '单帧异常不得向外抛出')
+    assert.strictEqual(timers.length, 2, '出错后必须继续排下一帧')
+})
+
+// 占位内容不得当数据展示：揭示窗口前必须先渲染课表
+test('揭示窗口前先渲染课表，占位内容不当作数据展示', () => {
+    const {ipc, context} = setup()
+    vm.runInContext(
+        'root = {style: {display: null}}; renderCalls = 0; ' +
+        'setScheduleClass = () => { renderCalls++ }; setSidebar = () => {}',
+        context
+    )
+
+    ipc.handlers.get('showMainWindow')({})
+    assert.strictEqual(context.renderCalls, 1, '揭示前必须渲染一次课表')
+    assert.strictEqual(vm.runInContext('root.style.display', context), 'block')
+
+    ipc.handlers.get('showMainWindow')({})
+    assert.strictEqual(context.renderCalls, 1, '已渲染过就不必重复渲染')
+})
+
+// 揭示时机回归：云端还在重试时保持隐藏，确认不可用后才按本地配置兜底显示
+test('未确认云端不可用前保持隐藏，确认后才兜底显示', async () => {
+    const timers = []
+    const {ipc, context} = setup({setTimeout: (fn) => { timers.push(fn); return timers.length }})
+    vm.runInContext('root = {style: {display: null}}', context)
+
+    await vm.runInContext('revealWindowWithoutConfig()', context)
+    assert.notStrictEqual(vm.runInContext('root.style.display', context), 'block', '还在重试不得抢先显示')
+    assert.strictEqual(timers.length, 1, '应继续等待下一次检查')
+
+    ipc.api.invoke = async () => ({isOffline: true})
+    await vm.runInContext('revealWindowWithoutConfig()', context)
+    assert.strictEqual(vm.runInContext('root.style.display', context), 'block', '确认不可用后应兜底显示')
 })

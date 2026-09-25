@@ -273,6 +273,7 @@ function changeScheduleClass(classHtml, inner) {
 }
 
 function setScheduleClass() {
+    hasRenderedSchedule = true;
     let classHtml = '';
     for (let i = 0; i < scheduleData.scheduleArray.length; i++) {
         let inner = scheduleData.scheduleArray[i]
@@ -481,7 +482,13 @@ function scheduleNextTick() {
     const now = Date.now();
     const delay = 1000 - (now % 1000);
     setTimeout(() => {
-        tick();
+        // tick 内部任何抛错都会让下一帧不再排队，界面会永久冻结在上一帧
+        // （表现为一直停在 HTML 占位「加载中」），所以单帧异常不得中断心跳
+        try {
+            tick();
+        } catch (e) {
+            console.error('[Tick] frame failed, heartbeat continues:', e);
+        }
         scheduleNextTick();
     }, delay);
 }
@@ -662,7 +669,7 @@ async function initDomAndStart() {
 // 等待配置的宽限时间：超过它仍无配置就按本地 startup_behavior 兜底显示
 const CONFIG_WAIT_REVEAL_MS = 8000
 
-function revealWindowWithoutConfig() {
+async function revealWindowWithoutConfig() {
     if (hasConfigFromCloud) return
     const behavior = scheduleConfig?.startup_behavior || 'normal'
     if (behavior !== 'normal') {
@@ -670,7 +677,20 @@ function revealWindowWithoutConfig() {
         return
     }
     if (!root) return
-    console.log('[Startup] No schedule config yet, revealing window with local config')
+    // 只有云端确实不可用（请求已失败）才用本地配置兜底显示；只要还在重试就继续等，
+    // 避免还没收到响应就把窗口显示出来（用户看到的是占位「加载中」而不是数据）
+    let offline = false
+    try {
+        offline = !!(await ipcRenderer.invoke('getOfflineStatus'))?.isOffline
+    } catch (e) {
+        console.error('[Startup] Failed to read offline status:', e)
+    }
+    if (!offline) {
+        console.log('[Startup] No schedule config yet, cloud still retrying, keep hidden')
+        setTimeout(revealWindowWithoutConfig, CONFIG_WAIT_REVEAL_MS)
+        return
+    }
+    console.log('[Startup] Cloud unavailable, revealing window with local config')
     revealMainWindow()
 }
 
@@ -711,12 +731,26 @@ function applyVisibilityState() {
     }
 }
 
+// 是否已经把课表渲染进 DOM（HTML 里的占位「加载中/Loading」是否已被替换）
+let hasRenderedSchedule = false
+
+// 揭示前必须保证课表已渲染，否则窗口会把 HTML 占位内容当数据展示给用户
+// （历史缺陷：云端还没响应就显示「加载中」）
+function ensureScheduleRendered() {
+    if (hasRenderedSchedule) return
+    hasRenderedSchedule = true
+    scheduleData = getScheduleData()
+    setScheduleClass()
+    setSidebar()
+}
+
 // 揭示即终态
 function revealMainWindow() {
     if (!root) {
         pendingShow = true
         return
     }
+    ensureScheduleRendered()
     root.style.display = 'block'
     applyVisibilityState()
 }
