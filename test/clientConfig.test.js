@@ -311,3 +311,31 @@ test('调度器：空规则集回落到本地设置且标记为未接管', () =>
     assert.equal(scheduler.effective('isDuringClassCountdown', true), true, '未接管时不参与覆盖')
     scheduler.dispose()
 })
+
+test('调度器：渲染进程未就绪只记 warn、不记账，页面就绪后仍会重试', () => {
+    const warns = []
+    const errors = []
+    const originalWarn = console.warn
+    const originalError = console.error
+    console.warn = (...args) => warns.push(args.join(' '))
+    console.error = (...args) => errors.push(args.join(' '))
+    try {
+        scheduler.init({
+            getLocalSetting: (key, fallback) => fallback,
+            applySetting: (key) => {
+                const notReady = new Error('renderer not ready for ' + key)
+                notReady.code = 'RENDERER_NOT_READY'
+                throw notReady
+            }
+        })
+        scheduler.updateFromSchedule({ client_config_rules: [] })
+
+        assert.ok(warns.some((line) => line.includes('渲染进程未就绪')), '预期未就绪应记 warn')
+        assert.equal(errors.length, 0, '预期未就绪不应刷 ERROR')
+        assert.equal(scheduler.isControlled('isDuringClassCountdown'), false, '未送达不得记为已接管')
+    } finally {
+        console.warn = originalWarn
+        console.error = originalError
+        scheduler.dispose()
+    }
+})

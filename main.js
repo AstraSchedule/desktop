@@ -116,17 +116,32 @@ const CLIENT_CONFIG_CHANNELS = {
     isDuringClassCountdown: 'ClassCountdown'
 }
 
+// 把生效值下发到渲染进程。页面未加载完时 webContents.send 会被静默丢弃，
+// 必须抛错让调用方不要记账：clientConfig 一旦记下「已下发」，值不变时就永远不会重发，
+// 渲染进程会永久停在默认值；带错误码是为了让调用方按预期/故障分级记录
+function pushRendererSetting(channel, value) {
+    if (!win || win.isDestroyed() || !win.webContents || win.webContents.isDestroyed()) return
+    if (win.webContents.isLoading()) {
+        const notReady = new Error('renderer not ready for ' + channel)
+        notReady.code = 'RENDERER_NOT_READY'
+        throw notReady
+    }
+    win.webContents.send(channel, Boolean(value))
+}
+
 function applyClientConfigSetting(key, value, fromRule) {
+    // 托盘勾选跟随「求值结果」，与 IPC 是否投递成功无关：先同步，
+    // 避免窗口不可用或页面未就绪时的提前 return/throw 把它一起跳过
+    syncTrayCheckbox(key, Boolean(value), fromRule)
     if (key === 'isWindowAlwaysOnTop') {
         if (win && !win.isDestroyed()) {
             if (value) win.setAlwaysOnTop(true, 'screen-saver', 9999999999999)
             else win.setAlwaysOnTop(false)
         }
-    } else {
-        const channel = CLIENT_CONFIG_CHANNELS[key]
-        if (channel && win && !win.isDestroyed()) win.webContents.send(channel, Boolean(value))
+        return
     }
-    syncTrayCheckbox(key, Boolean(value), fromRule)
+    const channel = CLIENT_CONFIG_CHANNELS[key]
+    if (channel) pushRendererSetting(channel, value)
 }
 
 // 托盘里的勾选状态跟随实际生效值；被自动任务接管的项置灰，避免用户误以为点了会生效
@@ -1081,6 +1096,13 @@ app.whenReady().then(() => {
         if (hasShownWindow) {
             win.webContents.send('showMainWindow')
         }
+    })
+    // 自动客户端配置（上课隐藏/始终缩小/上课倒计时/窗口置顶）同样只在首次拉取时下发一次，
+    // 早于页面就绪的那次会被丢弃且不会重试（值没变即跳过），这里按当前生效值强制重推。
+    // 必须挂 did-stop-loading：did-finish-load 触发时 webContents.isLoading() 仍为 true，
+    // 挂那里会被「渲染进程未就绪」挡掉，只能退回 20s tick 兜底
+    win.webContents.on('did-stop-loading', () => {
+        clientConfig.recompute(true)
     })
     // powerMonitor 事件无 preventDefault
     electron.powerMonitor.on('suspend', () => {

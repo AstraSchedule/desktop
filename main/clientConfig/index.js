@@ -111,7 +111,12 @@ function recompute(force) {
             deps.applySetting(key, value, nowControlled)
         } catch (e) {
             // 应用失败时不记录状态，下个 tick 会重试（避免状态与窗口实际不一致）
-            console.error('[ClientConfig] 应用配置失败:', key, e)
+            if (e?.code === 'RENDERER_NOT_READY') {
+                // 启动竞速下渲染进程未就绪属于预期，不是故障：一行 warn 即可，不刷 ERROR 堆栈
+                console.warn('[ClientConfig] 渲染进程未就绪，页面加载完成后会重推:', key)
+            } else {
+                console.error('[ClientConfig] 应用配置失败:', key, e)
+            }
             continue
         }
         controlled[key] = nowControlled

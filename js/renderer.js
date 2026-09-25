@@ -642,6 +642,12 @@ async function initDomAndStart() {
     // 启动心跳渲染（在合并配置后再启动）
     scheduleNextTick();
 
+    // 自备字体（@font-face）加载完成后行高会变，而位置是在字体到位前测量的：
+    // 字体就绪后再收敛一次，消除冷启动「框压在行上」的竞态
+    document.fonts?.ready?.then(() => applyVisibilityState()).catch((e) => {
+        console.error('[Show] fonts ready hook failed:', e)
+    })
+
     // 确保当前连接状态的颜色被正确应用
     if (wsConnected !== undefined) {
         updateUIColorsForConnectionStatus(wsConnected);
@@ -665,27 +671,59 @@ function revealWindowWithoutConfig() {
     }
     if (!root) return
     console.log('[Startup] No schedule config yet, revealing window with local config')
-    root.style.display = 'block'
+    revealMainWindow()
 }
 
 globalThis.addEventListener('DOMContentLoaded', () => {
     initDomAndStart().then(() => {
+        if (pendingNewConfig) {
+            const pending = pendingNewConfig
+            pendingNewConfig = null
+            applyNewConfig(pending)
+        }
         if (pendingShow && root) {
-            root.style.display = 'block'
             pendingShow = false
+            revealMainWindow()
         }
     }).catch(() => {
     })
 })
 
 let pendingShow = false
+// DOM 引用在 initDomAndStart 里绑定（root 最后绑定），云端配置可能早于它送达（启动竞速）：
+// 此时直接应用会在 root.style 上抛错，而 hasConfigFromCloud 已置真，配置既不生效、
+// 也不会再走兜底显示，因此先暂存到 DOM 就绪后再应用
+let pendingNewConfig = null
+
+// 可见状态（上课隐藏/始终缩小/上课倒计时）最终由 setCountdownerContent 决定：
+// 揭示窗口、配置生效后都必须立刻收敛到终态，否则中间态会先画出来，
+// 下一秒的 tick 再把它藏掉——表现为启动时"闪一下又消失"。
+// 注意：setCountdownerContent 会把倒计时框重新显示出来，必须紧跟 setCountdownerPosition
+// 重算坐标。只有它写 left/top，而 tick 只在日程变化时才重算（renderer.js tick），
+// 少了这一步就会把框显示在上一次测量出的旧坐标上（例如行容器隐藏时量到的 0 偏移），
+// 表现为倒计时框压在日程行上
+function applyVisibilityState() {
+    try {
+        setCountdownerContent()
+        setCountdownerPosition()
+    } catch (e) {
+        console.error('[Show] Failed to apply visibility state:', e)
+    }
+}
+
+// 揭示即终态
+function revealMainWindow() {
+    if (!root) {
+        pendingShow = true
+        return
+    }
+    root.style.display = 'block'
+    applyVisibilityState()
+}
+
 ipcRenderer.on('showMainWindow', () => {
     console.log('[Show] display change')
-    if (root) {
-        root.style.display = 'block'
-    } else {
-        pendingShow = true
-    }
+    revealMainWindow()
 })
 
 function setScheduleDialog() {
@@ -942,9 +980,7 @@ function recomputeWeatherWarnFromLast() {
     return true;
 }
 
-ipcRenderer.on('newConfig', (e, arg) => {
-    // 收到云端（或离线缓存）配置后，兜底显示逻辑不再需要介入
-    hasConfigFromCloud = true
+function applyNewConfig(arg) {
     // 云端下发的配置仅在当前会话生效，不写入本地用户配置
     // 保留本地调试输入值，避免被云端配置覆盖
     if (arg && !('debug_input_value' in arg)) {
@@ -984,6 +1020,23 @@ ipcRenderer.on('newConfig', (e, arg) => {
         }
     }
     setBanner();
+    // 配置可能晚于窗口揭示到达（异步）：立即按新配置收敛可见状态
+    if (root?.style.display === 'block') {
+        applyVisibilityState()
+    }
+}
+
+ipcRenderer.on('newConfig', (e, arg) => {
+    // 收到云端（或离线缓存）配置后，兜底显示逻辑不再需要介入
+    hasConfigFromCloud = true
+    // root 为空说明 DOM 尚未就绪：直接应用会在 root.style 上抛错，让整份配置丢失
+    if (!root) {
+        pendingNewConfig = arg
+        return
+    }
+    // DOM 已就绪即由本次调用接管，清掉可能残留的暂存，不依赖 DOMContentLoaded 的清理顺序
+    pendingNewConfig = null
+    applyNewConfig(arg)
 })
 
 ipcRenderer.on('ClassCountdown', (e, arg) => {

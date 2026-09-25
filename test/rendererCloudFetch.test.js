@@ -57,19 +57,27 @@ function baseConfig() {
 function setup() {
     const clock = createClock(FIXED_NOW)
     const ipc = createIpcStub()
+    // 捕获 DOMContentLoaded 回调：默认 fixture 把 addEventListener 设成空实现，
+    // 无法验证「初始化后回放暂存配置」这条真实路径
+    const domReadyListeners = []
     const {context} = loadRendererScripts({
         clock,
         storage: createStorage(),
         config: baseConfig(),
         ipc,
         weekIndex: 0,
-        sandbox: {$: JQUERY_STUB}
+        sandbox: {
+            $: JQUERY_STUB,
+            addEventListener: (type, callback) => {
+                if (type === 'DOMContentLoaded') domReadyListeners.push(callback)
+            }
+        }
     })
     vm.runInContext(DRAWING_STUBS, context)
     // 先跑一帧建立基线，后续断言只看新增消息
     vm.runInContext('tick()', context)
     ipc.sent.length = 0
-    return {clock, ipc, context}
+    return {clock, ipc, context, domReadyListeners}
 }
 
 function countChannel(ipc, channel) {
@@ -130,4 +138,52 @@ test('云端配置下发不自激拉取课表，但必须顺带请求天气', ()
     // 启动时云端配置往往早于第一次周期 tick 到达，天气请求就搭在这条重绘路径上，
     // 一旦被一起掐掉，客户端启动后会一直显示默认的 000℃
     assert.ok(countChannel(ipc, 'getWeather') >= 1, '配置下发触发的重绘必须请求天气')
+})
+
+// 启动竞速回归：云端配置可能早于 DOM 就绪（root 尚未绑定）送达。
+// 历史缺陷：此时直接应用会在 root.style 上空引用抛错，而 hasConfigFromCloud 已置真，
+// 配置既没生效、也不会再走 8s 兜底显示，窗口停在默认画面上。
+test('DOM 未就绪时 newConfig 暂存，DOMContentLoaded 后回放', async () => {
+    const {ipc, context, domReadyListeners} = setup()
+    assert.strictEqual(domReadyListeners.length, 1, '应注册 DOMContentLoaded 回调')
+
+    assert.strictEqual(vm.runInContext('root', context), null, '初始化前 root 尚未绑定')
+    assert.doesNotThrow(
+        () => ipc.handlers.get('newConfig')({}, {...baseConfig(), week_display: true}),
+        '配置早到不得抛错'
+    )
+    assert.strictEqual(vm.runInContext('hasConfigFromCloud', context), true, '配置送达后兜底显示不再介入')
+    assert.strictEqual(vm.runInContext('pendingNewConfig !== null', context), true, '配置应被暂存')
+
+    // 只隔离 DOM 初始化，回放接线走真实代码：删掉回放逻辑本用例必须失败
+    vm.runInContext(
+        'root = {style: {setProperty() {}}}; classContainer = {}; initDomAndStart = async () => {}',
+        context
+    )
+    domReadyListeners[0]()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    assert.strictEqual(vm.runInContext('pendingNewConfig === null', context), true, '回放后应清空暂存位')
+    assert.strictEqual(vm.runInContext('scheduleConfig.week_display', context), true, '暂存的配置应已应用')
+    assert.strictEqual(countChannel(ipc, 'getScheduleFromCloud'), 0, '应用配置本身不得自激拉取')
+})
+
+// 揭示时序回归：showMainWindow 必须先把「上课隐藏/始终缩小」的可见状态算出来再显示，
+// 否则会先画出未应用隐藏规则的画面、下一秒的 tick 再把它藏掉（"闪一下又消失"）。
+// 同时必须重算位置：setCountdownerContent 会让倒计时框重新可见，而 tick 只在日程变化时
+// 才重算坐标，漏掉就会把框显示在旧坐标上（历史缺陷：倒计时框压在日程行上）。
+test('揭示窗口时立即收敛可见状态与位置，不留下会闪或错位的中间态', () => {
+    const {ipc, context} = setup()
+
+    vm.runInContext(
+        'root = {style: {display: null}}; revealCalls = 0; positionCalls = 0; ' +
+        'setCountdownerContent = () => { revealCalls++ }; ' +
+        'setCountdownerPosition = () => { positionCalls++ }',
+        context
+    )
+    ipc.handlers.get('showMainWindow')({})
+
+    assert.strictEqual(vm.runInContext('root.style.display', context), 'block')
+    assert.strictEqual(context.revealCalls, 1, '揭示时应同步收敛可见状态')
+    assert.strictEqual(context.positionCalls, 1, '揭示时必须重算坐标，否则会停在旧位置')
 })
