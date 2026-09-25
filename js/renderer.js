@@ -353,6 +353,7 @@ function setCountdownerContent() {
         miniCountdown.style.display = 'none'
         if (globalContainer) globalContainer.style.display = 'block'
     }
+    diagSnapshot('content')
 }
 
 function setCountdownerPosition() {
@@ -410,6 +411,7 @@ function setCountdownerPosition() {
 
     // 恢复过渡效果
     countdownContainer.style.transition = originalTransition;
+    diagSnapshot('position')
 }
 
 function setSidebar() {
@@ -671,7 +673,7 @@ function revealWindowWithoutConfig() {
     }
     if (!root) return
     console.log('[Startup] No schedule config yet, revealing window with local config')
-    revealMainWindow()
+    revealMainWindow('fallback-8s')
 }
 
 globalThis.addEventListener('DOMContentLoaded', () => {
@@ -683,7 +685,7 @@ globalThis.addEventListener('DOMContentLoaded', () => {
         }
         if (pendingShow && root) {
             pendingShow = false
-            revealMainWindow()
+            revealMainWindow('dom-ready-flush')
         }
     }).catch(() => {
     })
@@ -694,6 +696,43 @@ let pendingShow = false
 // 此时直接应用会在 root.style 上抛错，而 hasConfigFromCloud 已置真，配置既不生效、
 // 也不会再走兜底显示，因此先暂存到 DOM 就绪后再应用
 let pendingNewConfig = null
+
+// 【诊断】临时快照：只在数值变化时打印，用于定位窗口揭示/倒计时错位/天气三个问题
+function diagSnapshot(tag) {
+    try {
+        const gl = document.getElementById('globalContainer');
+        const hl = document.getElementById('highlighted');
+        const snapshot = {
+            tag,
+            hasConfig: hasConfigFromCloud,
+            placeholder: classContainer ? (classContainer.innerText || '').replaceAll('\n', ' ').slice(0, 24) : null,
+            rootDisplay: root ? root.style.display : null,
+            type: scheduleData?.currentHighlight?.type ?? null,
+            classHidden: isClassHidden,
+            alwaysMin: isAlwaysMinimized,
+            classCountdown: isClassCountdown,
+            fonts: document.fonts?.status,
+            content: countdownContainer?.style.display,
+            mini: miniCountdown?.style.display,
+            global: gl?.style.display,
+            classTop: classContainer?.offsetTop,
+            classH: classContainer?.offsetHeight,
+            hlLeft: hl?.offsetLeft,
+            hlW: hl?.offsetWidth,
+            hlParent: hl?.parentElement?.id || hl?.parentElement?.className || null,
+            x: countdownContainer?.style.left,
+            y: countdownContainer?.style.top,
+            ccW: cacheCountdownContainerOffsetWidth
+        };
+        const key = JSON.stringify(snapshot);
+        if (key !== diagSnapshot.last) {
+            diagSnapshot.last = key;
+            console.log('[Diag]', key);
+        }
+    } catch (e) {
+        console.error('[Diag] snapshot failed', e);
+    }
+}
 
 // 可见状态（上课隐藏/始终缩小/上课倒计时）最终由 setCountdownerContent 决定：
 // 揭示窗口、配置生效后都必须立刻收敛到终态，否则中间态会先画出来，
@@ -712,18 +751,21 @@ function applyVisibilityState() {
 }
 
 // 揭示即终态
-function revealMainWindow() {
+function revealMainWindow(source = 'unknown') {
     if (!root) {
         pendingShow = true
+        diagSnapshot('reveal-pending:' + source)
         return
     }
+    diagSnapshot('reveal-before:' + source)
     root.style.display = 'block'
     applyVisibilityState()
+    diagSnapshot('reveal-after:' + source)
 }
 
 ipcRenderer.on('showMainWindow', () => {
     console.log('[Show] display change')
-    revealMainWindow()
+    revealMainWindow('showMainWindow')
 })
 
 function setScheduleDialog() {

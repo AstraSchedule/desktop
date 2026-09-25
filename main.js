@@ -1505,12 +1505,13 @@ function requestWeatherWithRetry() {
     weatherRequestInFlight = true
 
     const { agreement } = getProtocols()
-    const request = astraRequest(
-        `${agreement}://${getServer()}/api/weather/${store.get('local', "")}`
-    )
+    const weatherUrl = `${agreement}://${getServer()}/api/weather/${store.get('local', "")}`
+    console.log('[Diag][Weather] request', weatherUrl)
+    const request = astraRequest(weatherUrl)
     let raw = ''
     request.on('response', (response) => {
         const status = response.statusCode || 0
+        console.log('[Diag][Weather] status', status)
         // 同上：天气文案/预警文本含中文，必须按流编码解码
         response.setEncoding('utf8')
         response.on('data', (chunk) => {
@@ -1532,7 +1533,8 @@ function requestWeatherWithRetry() {
             }
         })
     })
-    request.on('error', () => {
+    request.on('error', (err) => {
+        console.log('[Diag][Weather] error', err?.code || err?.message || 'unknown', 'retryCount', weatherRetryCount)
         // 网络错误仅重试，不提示、不改变 UI
         scheduleWeatherRetry()
     })
