@@ -6,11 +6,55 @@ on:
       - main
 
 jobs:
+  # 版本号只在这里计算一次，经 job output 提供给两个矩阵任务共用。
+  # 若各任务各自 Get-Date：跨午夜/月末或失败重跑时两次算出的日期不同，
+  # 两个通道会发布到不同的 release，而 electron-updater 只读最新 release，
+  # 导致其中一个通道找不到元数据、更新失败（CodeRabbit 意见 #1）。
+  version:
+    if: ${{ !startsWith(github.event.head_commit.message, 'docs') }}
+    runs-on: ubuntu-latest
+    outputs:
+      ver: ${{ steps.compute.outputs.ver }}
+    steps:
+      - id: compute
+        name: Compute rolling version
+        run: |
+          # 语义化版本：YYYYMM.D.N（均为数字且无前导零）
+          ym=$(date -u +%Y%m)
+          dd=$(date -u +%-d)
+          echo "ver=${ym}.$dd.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
   build_and_publish:
+    name: Build & Publish (${{ matrix.channel }})
+    needs: version
     if: ${{ !startsWith(github.event.head_commit.message, 'docs') }}
     permissions:
       contents: write
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      # 两个通道发布到同一个 release（标签 v<version>），串行执行避免并发创建 release 竞争
+      max-parallel: 1
+      matrix:
+        include:
+          # 默认通道：旧版 Electron（最后支持 Win7/8 的 22.x）、ia32，元数据文件 latest.yml
+          - channel: win7
+            electron: "22.3.27"
+            arch: ia32
+            channel_file: "latest.yml"
+            setup_artifact: "AstraSchedule-Setup-${version}.${ext}"
+            portable_artifact: "AstraSchedule-Portable-${version}.${ext}"
+            installer_alias: "AstraScheduleInstaller.exe"
+            artifact_name: "dist-windows-win7"
+          # Win10+ 通道：新版本 Electron（已不再提供 win32-ia32，故用 x64），元数据文件 win10.yml
+          - channel: win10
+            electron: "latest"
+            arch: x64
+            channel_file: "win10.yml"
+            setup_artifact: "AstraSchedule-Setup-Win10-${version}.${ext}"
+            portable_artifact: "AstraSchedule-Portable-Win10-${version}.${ext}"
+            installer_alias: "AstraScheduleInstallerWin10.exe"
+            artifact_name: "dist-windows-win10"
 
     steps:
       - name: Checkout code
@@ -29,43 +73,78 @@ jobs:
         with:
           bun-version: 'latest'
 
-      - name: Install dependencies
-        run: bun install
-
-      - name: Compute rolling version and write to package.json
+      - name: Prepare package.json (rolling version / electron / artifact names / channel)
         shell: pwsh
         run: |
-          # 语义化版本：YYYYMM.D.N（均为数字且无前导零）
-          $ym  = [int](Get-Date -Format 'yyyyMM')
-          $dd  = [int](Get-Date -Format 'dd')
-          $run = [int]${{ github.run_number }}
-          $ver = "$ym.$dd.$run"
-          Write-Host "Rolling version: $ver"
+          # 语义化版本：YYYYMM.D.N，由 version 任务统一计算（见 needs.version.outputs.ver），
+          # 保证两个通道在任何情况下都拿到同一个版本号、发布到同一个 release
+          $ver = '${{ needs.version.outputs.ver }}'
+
+          # Win10+ 通道动态取 npm 上的最新稳定版 Electron；Win7 通道固定 22.x
+          $electron = '${{ matrix.electron }}'
+          if ($electron -eq 'latest') {
+            $electron = (npm view electron version).Trim()
+            Write-Host "Resolved latest stable Electron: $electron"
+          }
+
           $pkgPath = "package.json"
           $pkg = Get-Content $pkgPath -Raw | ConvertFrom-Json
           $pkg.version = $ver
+          $pkg.devDependencies.electron = "^$electron"
+          # 分叉构建：两个通道的安装包命名必须区分，否则安装包会互相覆盖
+          $pkg.build.nsis.artifactName = '${{ matrix.setup_artifact }}'
+          $pkg.build.portable.artifactName = '${{ matrix.portable_artifact }}'
+
+          # 分叉构建：两个通道共用同一个 release 与版本号，只靠元数据文件名区分。
+          # Win10+ 通道写 win10.yml，默认通道保持 latest.yml。
+          $pub = $pkg.build.publish[0]
+          if ('${{ matrix.channel }}' -eq 'win10') {
+            $pub | Add-Member -NotePropertyName channel -NotePropertyValue 'win10' -Force
+          } else {
+            $pub.PSObject.Properties.Remove('channel')
+          }
+
           $pkg | ConvertTo-Json -Depth 100 | Out-File -Encoding UTF8 $pkgPath
+
+          Write-Host "Channel: ${{ matrix.channel }} | Version: $ver | Electron: $electron | Metadata: ${{ matrix.channel_file }}"
           Get-Content $pkgPath
 
-      - name: Build and publish to GitHub Releases (rolling)
+      - name: Install dependencies
+        run: bun install
+
+      # 两个通道都发布到同一个 GitHub release（标签 v<version>）：默认通道产出 latest.yml，
+      # Win10+ 通道产出 win10.yml，安装包名也已区分，互不覆盖。
+      - name: Build and publish to GitHub Releases
+        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bun run ci
+          # 两个通道会先后上传到同一个 release：第二个任务/重跑时该 release 可能已存在，
+          # electron-builder 默认拒绝上传超过 2 小时的 release，这里放开（版本号含 run_number，安全）。
+          EP_GH_IGNORE_TIME: "true"
+        run: |
+          bun x electron-builder --win --${{ matrix.arch }} --publish always
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Copy NSIS installer as AstraScheduleInstaller.exe
+      - name: Copy NSIS installer alias
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path dist -File | Where-Object { $_.Name -like "*-Setup-*.exe" } | Select-Object -First 1
+          if ($installer) {
+            Copy-Item $installer.FullName -Destination "dist/${{ matrix.installer_alias }}"
+            Write-Host "Copied $($installer.Name) -> dist/${{ matrix.installer_alias }}"
+          } else {
+            Write-Error "No NSIS installer found"
+            exit 1
+          }
+
+      - name: Upload installer alias to release
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $installer = Get-ChildItem -Path dist -Filter "*-Setup-*.exe" | Select-Object -First 1
-          if ($installer) {
-            Copy-Item $installer.FullName -Destination "dist/AstraScheduleInstaller.exe"
-            Write-Host "Copied $($installer.Name) -> dist/AstraScheduleInstaller.exe"
-            $ver = (Get-Content package.json | ConvertFrom-Json).version
-            gh release upload "v$ver" dist/AstraScheduleInstaller.exe --clobber
-          } else {
-            Write-Host "No NSIS installer found"
-          }
+          $ver = (Get-Content package.json | ConvertFrom-Json).version
+          gh release upload "v$ver" "dist/${{ matrix.installer_alias }}" --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload dist to OSS
         shell: pwsh
@@ -76,52 +155,35 @@ jobs:
           AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
         run: |
           $ver = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $channelFile = '${{ matrix.channel_file }}'
 
-          Write-Host "Uploading version: $ver"
+          $installer = Get-ChildItem -Path dist -File | Where-Object { $_.Name -like "*-Setup-*.exe" } | Select-Object -First 1
+          if (-not $installer) { Write-Error "NSIS installer not found."; exit 1 }
 
-          # 查找 NSIS 安装包
-          $installer = Get-ChildItem -Path dist -Filter "*-Setup-*.exe" | Select-Object -First 1
+          $yml = Get-ChildItem -Path dist -File | Where-Object { $_.Name -eq $channelFile } | Select-Object -First 1
+          if (-not $yml) { Write-Error "$channelFile not found."; exit 1 }
 
-          if (-not $installer) {
-            Write-Error "NSIS installer not found."
-            exit 1
+          function Push-OSS([string]$local, [string]$key) {
+            Write-Host "Uploading $key"
+            aws s3 cp $local "s3://yanmo-objects/$key" --endpoint-url "https://cn-nb1.rains3.com"
+            if ($LASTEXITCODE -ne 0) { Write-Error "Failed to upload $key"; exit $LASTEXITCODE }
           }
 
-          # 上传 Setup.exe
-          aws s3 cp `
-            $installer.FullName `
-            "s3://yanmo-objects/AstraSchedule/$ver/$($installer.Name)" `
-            --endpoint-url "https://cn-nb1.rains3.com"
+          Write-Host "Uploading version: $ver (channel: ${{ matrix.channel }})"
 
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Failed to upload installer."
-            exit $LASTEXITCODE
-          }
+          # 按版本归档（latest.yml 与 win10.yml 都在同一目录）
+          Push-OSS $installer.FullName "AstraSchedule/$ver/$($installer.Name)"
+          Push-OSS $yml.FullName "AstraSchedule/$ver/$channelFile"
 
-          # 上传 latest.yml
-          $latest = Get-ChildItem -Path dist -Filter "latest.yml" | Select-Object -First 1
-
-          if (-not $latest) {
-            Write-Error "latest.yml not found."
-            exit 1
-          }
-
-          aws s3 cp `
-            $latest.FullName `
-            "s3://yanmo-objects/AstraSchedule/$ver/latest.yml" `
-            --endpoint-url "https://cn-nb1.rains3.com"
-
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Failed to upload latest.yml."
-            exit $LASTEXITCODE
-          }
+          # 稳定 latest 目录：作为可选的 generic 更新源，两个通道的 yml 与安装包都维护在这里
+          Push-OSS $installer.FullName "AstraSchedule/latest/$($installer.Name)"
+          Push-OSS $yml.FullName "AstraSchedule/latest/$channelFile"
 
           Write-Host "OSS upload completed: AstraSchedule/$ver/"
 
       - name: Upload dist as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dist-windows
-          path: |
-            dist/**
+          name: ${{ matrix.artifact_name }}
+          path: dist/**
           if-no-files-found: warn

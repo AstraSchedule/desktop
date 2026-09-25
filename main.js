@@ -658,6 +658,31 @@ function isSemver(v) {
     return /^\d+\.\d+\.\d+(?:[-+].*)?$/.test(String(v || ''))
 }
 
+// 是否为 Windows 10 或更高版本。Node 在 Windows 上 os.release() 返回内核版本：
+// Win10/Win11 均为 10.x，Win8.1 为 6.3，Win7 为 6.1。新版本 Electron 只支持 Win10+，
+// 分叉构建据此判断是否可以切换到 Win10+ 更新通道。
+function isWindows10OrNewer() {
+    if (process.platform !== 'win32') return false
+    const major = Number.parseInt(String(os.release()).split('.')[0], 10)
+    return Number.isFinite(major) && major >= 10
+}
+
+// 当前系统能否运行 x64 安装包（Win10+ 通道是 x64 构建）。当前发布的客户端是 ia32，
+// 运行在 64 位 Windows 上时环境变量 PROCESSOR_ARCHITEW6432 为 AMD64；32 位 Windows 上不存在该变量。
+// ARM64 的 Windows 10 没有 x64 模拟，保守处理：不切换通道，继续留在 ia32 兼容构建。
+function canRunX64Build() {
+    if (process.platform !== 'win32') return false
+    if (process.arch === 'x64') return true
+    return String(process.env.PROCESSOR_ARCHITEW6432 || '') === 'AMD64'
+}
+
+// 默认更新源地址（latest.yml / win10.yml 与安装包所在目录）- 适配 GitHub 最新发布路径
+const DEFAULT_UPDATE_MIRROR = 'https://hubproxy.khbit.cn/https://github.com/daizihan233/AstraSchedule/releases/latest/download'
+// 分叉构建的两个更新通道：两个构建共用同一个 release 与版本号，只是元数据文件名不同
+// - 默认通道 latest.yml：Win7/8.1 兼容构建（旧版 Electron）
+// - Win10+ 通道 win10.yml：新版本 Electron 构建
+const WIN10_UPDATE_CHANNEL = 'win10'
+
 // 自动更新设置（仅打包且版本为 semver 时生效）
 let updaterInitialized = false
 function setupAutoUpdater() {
@@ -674,14 +699,27 @@ function setupAutoUpdater() {
         }
         if (updaterInitialized) return
         const { autoUpdater } = require('electron-updater')
-        // 默认镜像地址（latest.yml 与安装包所在目录）- 适配 GitHub 最新发布路径
-        const defaultMirror = 'https://hubproxy.khbit.cn/https://github.com/daizihan233/AstraSchedule/releases/latest/download'
         let updateBaseUrl = store.get('updateBaseUrl')
+        let usingDefaultSource = false
         if (!updateBaseUrl || typeof updateBaseUrl !== 'string' || updateBaseUrl.trim().length === 0) {
-            updateBaseUrl = defaultMirror
+            updateBaseUrl = DEFAULT_UPDATE_MIRROR
             store.set('updateBaseUrl', updateBaseUrl)
+            usingDefaultSource = true
+        } else {
+            usingDefaultSource = updateBaseUrl.trim() === DEFAULT_UPDATE_MIRROR
         }
         autoUpdater.setFeedURL({ provider: 'generic', url: updateBaseUrl.trim() })
+        // 分叉构建：仍在使用默认更新源、且当前系统为 Win10+ 并能运行 x64 安装包时，
+        // 切换到 Win10+ 通道（同一下载目录下的 win10.yml），让用户升级到新依赖的构建而不是
+        // 一直停留在 Win7 兼容版。32 位系统装不了 x64 包，必须留在 ia32 通道（CodeRabbit 意见 #2）。
+        // 用户自行配置过更新源时不干预，每次启动重新判定，因此不持久化通道选择。
+        if (usingDefaultSource && isWindows10OrNewer() && canRunX64Build()) {
+            console.log('[Updater] Windows 10+ x64-capable detected, switching to win10+ update channel')
+            autoUpdater.channel = WIN10_UPDATE_CHANNEL
+            // electron-updater 的 channel 赋值会把 allowDowngrade 置为 true（AppUpdater.js），
+            // 显式关闭：通道元数据滞后或代理返回旧 win10.yml 时不允许自动降级（CodeRabbit 意见 #3）
+            autoUpdater.allowDowngrade = false
+        }
         autoUpdater.autoDownload = true
         autoUpdater.autoInstallOnAppQuit = true
         autoUpdater.allowPrerelease = true
