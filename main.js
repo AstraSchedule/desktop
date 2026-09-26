@@ -959,6 +959,19 @@ function scheduleFetchRetry(mySeq) {
     }, delay)
 }
 
+// 启动时复用上次成功拉取的课表版本（规则见 main/scheduleVersion.js）。
+// 不复用的话首包恒为 version=0，边缘缓存每次落空、请求全部回源。
+function restoreVersionTokenFromCache() {
+    try {
+        const picked = pickReusableVersion(offlineCache.getCachedVersions())
+        if (!picked) return
+        currentVersionToken = picked
+        console.log(`[Schedule] 复用上次的课表版本：${currentVersionToken}`)
+    } catch (e) {
+        console.warn('[Schedule] 复用课表版本失败，按首次拉取处理', e)
+    }
+}
+
 function getScheduleFromCloud() {
     const { agreement } = getProtocols()
     // 添加 version 查询参数
@@ -1114,6 +1127,7 @@ function getScheduleFromCloud() {
     })
     request.end()
 }
+const { pickReusableVersion } = require('./main/scheduleVersion');
 const { startAeroMonitoring, stopAeroMonitoring } = require('./main/aeroCheck');
 
 app.whenReady().then(() => {
@@ -1125,6 +1139,8 @@ app.whenReady().then(() => {
     Menu.setApplicationMenu(null)
     registerCountdownIpc(countdownCtx)
     setupAutoUpdater()
+    // 先复用上次的版本号，再做网络检查与拉取：否则首包恒为 version=0，边缘缓存全部落空
+    restoreVersionTokenFromCache()
     // 先进行网络连接检查，然后获取课表数据
     getScheduleFromCloudWithRetry().then(() => {});
     refreshCountdownWindow('startup').catch(() => {
@@ -1837,6 +1853,8 @@ ipcMain.on('setClass', (e, arg) => {
 
 // 添加 IPC 事件处理器，用于处理来自渲染进程的 getScheduleFromCloud 请求
 ipcMain.on('getScheduleFromCloud', () => {
+    // 渲染进程的「更新课表」要的是最新数据：版本归零强制回源，不复用边缘缓存
+    currentVersionToken = '0'
     // 直接调用 getScheduleFromCloud 函数
     getScheduleFromCloud();
 });
