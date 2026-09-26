@@ -11,8 +11,10 @@ const DEFAULT_UPDATE_MIRROR = 'https://ningbo.rainyun.oss.ymbit.cn/AstraSchedule
 // 需要迁移的历史默认源：hubproxy 代理本仓库的 GitHub 发布地址。
 // 只按「已知的历史默认地址形态」匹配（主机 + 本仓库 releases 代理路径），不按主机一刀切，
 // 否则用户自行配置的其它 hubproxy 路径会被替换成默认源而丢配置（CodeRabbit 意见 #5）。
+// 仓库改过两次名（GitHub 自动重定向），三个名字都出现过在客户端的默认源里：
+//   daizihan233/ElectronClassSchedule → daizihan233/AstraSchedule → AstraSchedule/desktop
 const LEGACY_MIRROR_HOST = 'hubproxy.khbit.cn'
-const LEGACY_MIRROR_PATH = /^\/https?:\/\/github\.com\/(daizihan233\/AstraSchedule|AstraSchedule\/desktop)\/releases\//
+const LEGACY_MIRROR_PATH = /^\/https?:\/\/github\.com\/(daizihan233\/(ElectronClassSchedule|AstraSchedule)|AstraSchedule\/desktop)\/releases\//
 
 function isLegacyMirror(url) {
     let parsed

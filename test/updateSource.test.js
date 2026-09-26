@@ -8,6 +8,8 @@ const assert = require('node:assert')
 
 const {DEFAULT_UPDATE_MIRROR, resolveUpdateSource} = require('../main/update-source')
 
+// 三个仓库名都曾是客户端的默认更新源（仓库改过两次名，GitHub 自动重定向）
+const LEGACY_EARLY = 'https://hubproxy.khbit.cn/https://github.com/daizihan233/ElectronClassSchedule/releases/latest/download'
 const LEGACY_IA32 = 'https://hubproxy.khbit.cn/https://github.com/daizihan233/AstraSchedule/releases/latest/download'
 const LEGACY_WIN10 = 'https://hubproxy.khbit.cn/https://github.com/AstraSchedule/desktop/releases/latest/download'
 
@@ -24,7 +26,7 @@ test('已是新默认源时保持不变', () => {
 })
 
 test('旧的 hubproxy 源（含历史持久化值）自动迁移到新默认源', () => {
-    for (const legacy of [LEGACY_IA32, LEGACY_WIN10]) {
+    for (const legacy of [LEGACY_EARLY, LEGACY_IA32, LEGACY_WIN10]) {
         const r = resolveUpdateSource(legacy)
         assert.strictEqual(r.url, DEFAULT_UPDATE_MIRROR, legacy)
         assert.strictEqual(r.usingDefault, true, legacy)
