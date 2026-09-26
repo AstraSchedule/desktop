@@ -10,6 +10,7 @@ const Store = require('electron-store');
 const store = new Store();
 const clientConfig = require('./main/clientConfig');
 const {shouldAttemptInstall, recordAttempt, STORE_KEY} = require('./main/updater-guard');
+const {DEFAULT_UPDATE_MIRROR, resolveUpdateSource} = require('./main/update-source');
 
 // 安装器可在安装目录写入一次性初始化文件。仅打包应用读取，避免开发目录中的文件
 // 意外影响开发配置；导入成功后删除文件，后续运行完全依赖 electron-store。
@@ -690,8 +691,8 @@ function canRunX64Build() {
     return String(process.env.PROCESSOR_ARCHITEW6432 || '') === 'AMD64'
 }
 
-// 默认更新源地址（latest.yml / win10.yml 与安装包所在目录）- 适配 GitHub 最新发布路径
-const DEFAULT_UPDATE_MIRROR = 'https://hubproxy.khbit.cn/https://github.com/daizihan233/AstraSchedule/releases/latest/download'
+// 默认更新源地址（latest.yml / win10.yml 与安装包所在目录）由 main/update-source.js 提供：
+// 指向 OSS 稳定目录，hubproxy 关停后旧源会在启动时自动迁移过来。
 // 分叉构建的两个更新通道：两个构建共用同一个 release 与版本号，只是元数据文件名不同
 // - 默认通道 latest.yml：Win7/8.1 兼容构建（旧版 Electron）
 // - Win10+ 通道 win10.yml：新版本 Electron 构建
@@ -713,15 +714,13 @@ function setupAutoUpdater() {
         }
         if (updaterInitialized) return
         const { autoUpdater } = require('electron-updater')
-        let updateBaseUrl = store.get('updateBaseUrl')
-        let usingDefaultSource = false
-        if (!updateBaseUrl || typeof updateBaseUrl !== 'string' || updateBaseUrl.trim().length === 0) {
-            updateBaseUrl = DEFAULT_UPDATE_MIRROR
-            store.set('updateBaseUrl', updateBaseUrl)
-            usingDefaultSource = true
-        } else {
-            usingDefaultSource = updateBaseUrl.trim() === DEFAULT_UPDATE_MIRROR
+        const source = resolveUpdateSource(store.get('updateBaseUrl'))
+        const updateBaseUrl = source.url
+        const usingDefaultSource = source.usingDefault
+        if (source.migrated) {
+            console.log('[Updater] 历史更新源（hubproxy）已迁移到新默认源:', updateBaseUrl)
         }
+        if (source.url !== store.get('updateBaseUrl')) store.set('updateBaseUrl', source.url)
         autoUpdater.setFeedURL({ provider: 'generic', url: updateBaseUrl.trim() })
         // 分叉构建：仍在使用默认更新源、且当前系统为 Win10+ 并能运行 x64 安装包时，
         // 切换到 Win10+ 通道（同一下载目录下的 win10.yml），让用户升级到新依赖的构建而不是

@@ -179,6 +179,13 @@ jobs:
           Push-OSS $installer.FullName "AstraSchedule/latest/$($installer.Name)"
           Push-OSS $yml.FullName "AstraSchedule/latest/$channelFile"
 
+          # 别名（官网/注册中心的固定下载链接用的就是这个名字）：hubproxy 关停后由 ESA
+          # 重定向按文件名映射到这里，缺了它那些旧链接会 404
+          $aliasPath = "dist/${{ matrix.installer_alias }}"
+          if (-not (Test-Path $aliasPath)) { Write-Error "Installer alias not found: $aliasPath"; exit 1 }
+          Push-OSS $aliasPath "AstraSchedule/$ver/${{ matrix.installer_alias }}"
+          Push-OSS $aliasPath "AstraSchedule/latest/${{ matrix.installer_alias }}"
+
           Write-Host "OSS upload completed: AstraSchedule/$ver/"
 
       - name: Upload dist as artifact
@@ -235,7 +242,9 @@ jobs:
             "${prefix}latest.yml",
             "${prefix}win10.yml",
             "${prefix}AstraSchedule-Setup-$ver.exe",
-            "${prefix}AstraSchedule-Setup-Win10-$ver.exe"
+            "${prefix}AstraSchedule-Setup-Win10-$ver.exe",
+            "${prefix}AstraScheduleInstaller.exe",
+            "${prefix}AstraScheduleInstallerWin10.exe"
           )
 
           $listed = aws s3api list-objects-v2 --bucket $env:BUCKET --prefix $env:PREFIX --endpoint-url $env:ENDPOINT --query 'Contents[].Key' --output text
