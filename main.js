@@ -735,7 +735,10 @@ function setupAutoUpdater() {
             autoUpdater.allowDowngrade = false
         }
         autoUpdater.autoDownload = true
-        autoUpdater.autoInstallOnAppQuit = true
+        // 安装只能走下面通过判定后的 quitAndInstall：开启 autoInstallOnAppQuit 时，
+        // 已下载的更新会在用户退出应用时被 electron-updater 自行安装，
+        // 等于绕开环路保护（CodeRabbit 意见 #4）
+        autoUpdater.autoInstallOnAppQuit = false
         autoUpdater.allowPrerelease = true
         autoUpdater.on('checking-for-update', () => console.log('[Updater] checking-for-update'))
         autoUpdater.on('update-available', (info) => {
