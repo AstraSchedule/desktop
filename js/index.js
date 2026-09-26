@@ -184,24 +184,24 @@ function getScheduleData() {
                 return true;
             }
         }
-        // 没有后续课程：遵循 timetable 的字符串标签，而不是恒定“放学”
-        // 1) 优先使用后续时段中出现的第一个字符串标签
-        let followingLabel = '';
-        for (let i = breakIndex + 1; i < timeRanges.length; i++) {
-            const v = dayTimetable[timeRanges[i]];
-            if (typeof v !== 'number' && v) {
-                followingLabel = String(v);
-                break;
+        // 没有后续课程：显示 timetable 中「当前时段」配置的文本标签，
+        // 既不是恒定“放学”，也不是下一段的标签（取下一段会让整条尾巴错位一格）
+        // 1) 优先使用当前时段自身的标签
+        let dismissalLabel = '';
+        const curVal2 = dayTimetable[breakRange];
+        if (typeof curVal2 !== 'number' && curVal2) dismissalLabel = String(curVal2);
+        // 2) 当前时段没有标签时，退回后续时段中出现的第一个字符串标签
+        if (!dismissalLabel) {
+            for (let i = breakIndex + 1; i < timeRanges.length; i++) {
+                const v = dayTimetable[timeRanges[i]];
+                if (typeof v !== 'number' && v) {
+                    dismissalLabel = String(v);
+                    break;
+                }
             }
         }
-        // 2) 若没有后续标签，则尝试用当前时段本身的标签（通常就是“放学”等）
-        if (!followingLabel) {
-            const curVal2 = dayTimetable[breakRange];
-            if (typeof curVal2 !== 'number' && curVal2) followingLabel = String(curVal2);
-        }
         // 3) 仍无则回退到 end_of_day_label 或默认"放学"
-        const dismissalFallback = (scheduleConfig['end_of_day_label']) || '放学';
-        const dismissalLabel = followingLabel || dismissalFallback;
+        if (!dismissalLabel) dismissalLabel = (scheduleConfig['end_of_day_label']) || '放学';
         setCurrentHighlightExternal(
             currentHighlight,
             Math.max(0, currentSchedule.length - 1),
