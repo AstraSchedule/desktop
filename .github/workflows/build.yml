@@ -187,3 +187,68 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: dist/**
           if-no-files-found: warn
+
+  # latest/ 目录必须只保留当前版本的产物：残留的旧安装包与旧 latest.yml/win10.yml
+  # 会让客户端读到「元数据声明的版本 ≠ 安装包实际版本」的更新源，出现装完版本不变、
+  # 反复下载安装的循环重启（见 #58）。两个通道都成功后才执行，避免只清一半、
+  # 造成两份 yml 版本不一致。用 pwsh 与仓库其它步骤保持一致。
+  prune_oss_latest:
+    name: Verify & prune OSS latest/
+    needs: [version, build_and_publish]
+    if: ${{ !startsWith(github.event.head_commit.message, 'docs') }}
+    runs-on: windows-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.OSS_SECRET_KEY }}
+      AWS_DEFAULT_REGION: cn-east-1
+      AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
+      ENDPOINT: https://cn-nb1.rains3.com
+      BUCKET: yanmo-objects
+      PREFIX: AstraSchedule/latest/
+    steps:
+      # 一致性闸门：两个通道的元数据都必须声明本次版本，否则宁可红，
+      # 也不能让客户端从自相矛盾的更新源里循环安装。
+      - name: Verify both channels report the current version
+        shell: pwsh
+        run: |
+          $ver = '${{ needs.version.outputs.ver }}'
+          foreach ($f in @('latest.yml', 'win10.yml')) {
+            $key = "$env:PREFIX$f"
+            $out = Join-Path $env:RUNNER_TEMP $f
+            aws s3api get-object --bucket $env:BUCKET --key $key --endpoint-url $env:ENDPOINT $out | Out-Null
+            if ($LASTEXITCODE -ne 0) { Write-Error "读取 $key 失败"; exit $LASTEXITCODE }
+            $got = ((Select-String -Path $out -Pattern '^version:\s*(.+)$' | Select-Object -First 1).Matches.Groups[1].Value).Trim()
+            if ($got -ne $ver) {
+              Write-Error "::error::$key 声明版本 $got，与本次发布 $ver 不一致"
+              exit 1
+            }
+            Write-Host "OK: $f -> $ver"
+          }
+
+      - name: Delete objects that are not part of this version
+        shell: pwsh
+        run: |
+          $ver = '${{ needs.version.outputs.ver }}'
+          # 注意：PS 里逗号优先级高于 +，必须先把前缀拼进变量，否则数组会被拆散
+          $prefix = $env:PREFIX
+          $keep = @(
+            "${prefix}latest.yml",
+            "${prefix}win10.yml",
+            "${prefix}AstraSchedule-Setup-$ver.exe",
+            "${prefix}AstraSchedule-Setup-Win10-$ver.exe"
+          )
+
+          $listed = aws s3api list-objects-v2 --bucket $env:BUCKET --prefix $env:PREFIX --endpoint-url $env:ENDPOINT --query 'Contents[].Key' --output text
+          if ($LASTEXITCODE -ne 0) { Write-Error '列出 latest/ 对象失败'; exit $LASTEXITCODE }
+          $keys = @($listed -split '\s+') | Where-Object { $_ -and $_ -ne 'None' }
+
+          Write-Host "Current version: $ver"
+          foreach ($key in $keys) {
+            # 只清理发布产物，目录里的其它对象（图标、说明等）不动
+            if ($key -notmatch '\.(exe|yml|blockmap)$') { Write-Host "keep (not a release artifact): $key"; continue }
+            if ($keep -contains $key) { Write-Host "keep: $key"; continue }
+            Write-Host "delete: $key"
+            aws s3 rm "s3://$env:BUCKET/$key" --endpoint-url $env:ENDPOINT
+            if ($LASTEXITCODE -ne 0) { Write-Error "删除 $key 失败"; exit $LASTEXITCODE }
+          }
+          Write-Host "OSS $env:PREFIX 现在只保留 $ver 的产物"
