@@ -52,6 +52,8 @@ function importInstallConfig() {
         const raw = buffer.includes(0) ? buffer.toString('utf16le') : buffer.toString('utf8');
         const config = parseInstallConfig(raw);
         const stringKeys = ['server', 'class', 'local'];
+        // isFromCloud 已废弃（本地文件模式下线，不再参与启动决策）：保留在预配置安装的键列表里
+        // 只为兼容旧命令行/安装脚本，写入后不会再被读取。
         const booleanKeys = ['isFromCloud', 'isSecureConnection', 'isAutoLaunch', 'isWindowAlwaysOnTop'];
         let imported = false;
 
@@ -243,11 +245,10 @@ function astraRequest(options) {
     return request
 }
 let classId = String(store.get("class", "39/2023/1"))
-let isFromCloud = store.get('isFromCloud', false)
 let lastScheduleConfig = null
 // 当前画面配置的来源：'cloud'（云端）/ 'cache'（本地缓存）/ null（还没有可用配置）
 let lastScheduleSource = null
-console.log('Class:', classId, 'Server:', getServer(), 'Secure:', store.get("isSecureConnection", true), 'Cloud:', isFromCloud);
+console.log('Class:', classId, 'Server:', getServer(), 'Secure:', store.get("isSecureConnection", true));
 
 const countdownCtx = {
     BrowserWindow,
@@ -629,7 +630,8 @@ function showMainWindow() {
 // 拿到第一份配置后按 startup_behavior 决定窗口行为，云端配置与本地缓存共用。
 // 返回 true 表示已安排退出应用，调用方不应再继续刷新其它窗口。
 function applyStartupBehavior(config, source) {
-    if (!isFromCloud) return false
+    // 揭示不再受「连接云端」开关影响：本地文件模式已下线，该开关已删除。
+    // 服务端决策拿不到时由缓存里的服务端决策兜底（loadScheduleFromCache 路径）。
     const startupBehavior = config?.startup_behavior || 'normal'
     countdownState.startupBehavior = startupBehavior
     console.log(`[Startup] startup_behavior=${startupBehavior} (${source})`)
@@ -1183,15 +1185,6 @@ ipcMain.on('getWeekIndex', (e, arg) => {
     // 而离线判定往往早于托盘创建，onStatusChange 那次刷新会被 tray 为空挡掉
     updateTrayTooltip(currentConnectionState, websocketDisabled)
     template = [
-        {
-            label: '连接云端',
-            type: 'checkbox',
-            checked: store.get('isFromCloud', false),
-            click: (e) => {
-                store.set('isFromCloud', e.checked)
-                isFromCloud = e.checked
-            }
-        },
         {
             icon: asset('image', 'toggle.png'),
             label: '更新源(可选)',

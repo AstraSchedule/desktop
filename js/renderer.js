@@ -662,19 +662,12 @@ async function initDomAndStart() {
 
 }
 
-// 云端确定不可用（主进程连续网络探测失败、且没有缓存可回放）时才按本地配置兜底显示，
-// 在此之前保持隐藏：没有真实数据时窗口不该出现（历史缺陷：露出 HTML 占位「加载中」）。
-// 不能用「首次请求失败」或 isOffline 之类的信号：那些发生时重试仍在排队，窗口会过早显示；
-// 有缓存的情况由主进程直接用缓存数据揭示（loadScheduleFromCache），无需这里的兜底。
+// 服务端决策在启动预算内不可达、且没有缓存可回落时，窗口保持隐藏（stay）：
+// 没有真实数据时窗口不该出现（历史缺陷：露出 HTML 占位「加载中」，或透明窗口完全看不见）。
+// 不能用「首次请求失败」或 isOffline 之类的信号：那些发生时重试仍在排队；
+// 有缓存的情况由主进程用缓存里的服务端决策揭示（loadScheduleFromCache），无需这里的兜底。
 ipcRenderer.on('scheduleUnavailable', () => {
-    if (hasConfigFromCloud) return
-    const behavior = scheduleConfig?.startup_behavior || 'normal'
-    if (behavior !== 'normal') {
-        console.log('[Startup] Cloud unavailable, keep hidden by local startup_behavior:', behavior)
-        return
-    }
-    console.log('[Startup] Cloud unavailable, revealing window with local config')
-    revealMainWindow()
+    console.log('[Startup] Cloud decision unavailable, staying hidden. hasConfigFromCloud =', hasConfigFromCloud)
 })
 
 globalThis.addEventListener('DOMContentLoaded', () => {

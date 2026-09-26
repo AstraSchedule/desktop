@@ -49,7 +49,7 @@ AstraSchedule-Setup.exe /S /SERVER=class.example.com /SCHOOL=39 /GRADE=2023 /CLA
 - `/SCHOOL=学校`、`/GRADE=年级`、`/CLASS=班级`：分别设置班级标识的三个部分，非空部分按顺序用 `/` 拼接；例如 `39`、`2023`、`1` 会生成 `39/2023/1`
 - `/LOCALP=省份`、`/LOCALC=城市或地区`：分别设置天气地区的两个部分，两个都填写时用 `/` 拼接，只填写一个时直接使用该值
 - `/LOCAL=地区`：旧版完整地区参数，未使用 `/LOCALP` 或 `/LOCALC` 时仍可用
-- `/CLOUD=0|1`：是否连接云端
+- `/CLOUD=0|1`：**已废弃**（本地文件模式已下线）——字段仍会被写入以兼容旧安装脚本，但不再被读取，不再影响任何行为
 - `/SECURE=0|1`：是否使用 HTTPS/WSS
 - `/AUTOLAUNCH=0|1`：是否开机启动
 - `/TOPMOST=0|1`：窗口是否置顶

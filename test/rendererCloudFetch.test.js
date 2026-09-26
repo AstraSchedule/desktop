@@ -221,23 +221,24 @@ test('揭示窗口前先渲染课表，占位内容不当作数据展示', () =>
     assert.strictEqual(context.renderCalls, 1, '已渲染过就不必重复渲染')
 })
 
-// 揭示时机回归：只有主进程确认「云端不可用」后才兜底显示，其余时间保持隐藏。
-// 不能用首次请求失败 / isOffline 之类的信号：那些发生时重试仍在排队。
-test('收到云端不可用信号后才兜底显示，已有配置时不再兜底', () => {
+// 启动决策回归：服务端决策拿不到且没有缓存可回落时保持隐藏（stay）。
+// 本地文件模式已废弃、「连接云端」开关已删除，本地 startup_behavior 不再参与启动决策；
+// 该信号只做记录，不得揭示窗口（窗口由主进程按服务端/缓存决策揭示，失败则继续退避重试）。
+test('云端不可用且无缓存时保持隐藏，不用本地配置兜底显示', () => {
     const {ipc, context} = setup()
-    vm.runInContext('root = {style: {display: null}}', context)
-
     const onUnavailable = ipc.handlers.get('scheduleUnavailable')
     assert.strictEqual(typeof onUnavailable, 'function', '应注册云端不可用信号处理器')
 
+    // 本地 startup_behavior 显式设为 normal：仍不得据此揭示
+    vm.runInContext('root = {style: {display: null}}; scheduleConfig.startup_behavior = "normal"', context)
     onUnavailable({})
-    assert.strictEqual(vm.runInContext('root.style.display', context), 'block', '确认不可用后应兜底显示')
+    assert.notStrictEqual(vm.runInContext('root.style.display', context), 'block', '无缓存时不得揭示窗口')
 
-    // 已有云端配置时不得再用本地配置兜底，否则会覆盖刚拿到的课表
+    // 已有服务端决策（云端或本地缓存）时不得改动窗口状态
     const second = setup()
-    vm.runInContext('root = {style: {display: null}}; hasConfigFromCloud = true', second.context)
+    vm.runInContext('root = {style: {display: "block"}}; hasConfigFromCloud = true', second.context)
     second.ipc.handlers.get('scheduleUnavailable')({})
-    assert.notStrictEqual(vm.runInContext('root.style.display', second.context), 'block', '已有配置时不得兜底')
+    assert.strictEqual(vm.runInContext('root.style.display', second.context), 'block', '已有决策时不得改动窗口')
 })
 
 // 渲染失败不得标记为已渲染：否则后续揭示会跳过渲染，把占位内容当数据展示
