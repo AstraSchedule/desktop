@@ -15,6 +15,10 @@ const DEFAULT_UPDATE_MIRROR = 'https://ningbo.rainyun.oss.ymbit.cn/AstraSchedule
 //   daizihan233/ElectronClassSchedule → daizihan233/AstraSchedule → AstraSchedule/desktop
 const LEGACY_MIRROR_HOST = 'hubproxy.khbit.cn'
 const LEGACY_MIRROR_PATH = /^\/https?:\/\/github\.com\/(daizihan233\/(ElectronClassSchedule|AstraSchedule)|AstraSchedule\/desktop)\/releases\//
+// 过渡期默认源：曾随 v202609.26.145 发布，客户端启动时会把它写回 electron-store。
+// 只认这个默认地址本身（主机 + 默认路径），该主机上的其它路径仍算用户自定义源（CodeRabbit 意见 #6）。
+const INTERIM_MIRROR_HOST = 'yanmo-objects.cn-nb1.rains3.com'
+const INTERIM_MIRROR_PATH = '/AstraSchedule/latest/'
 
 function isLegacyMirror(url) {
     let parsed
@@ -23,6 +27,7 @@ function isLegacyMirror(url) {
     } catch {
         return false
     }
+    if (parsed.hostname === INTERIM_MIRROR_HOST && parsed.pathname === INTERIM_MIRROR_PATH) return true
     return parsed.hostname === LEGACY_MIRROR_HOST && LEGACY_MIRROR_PATH.test(parsed.pathname)
 }
 

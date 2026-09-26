@@ -12,6 +12,8 @@ const {DEFAULT_UPDATE_MIRROR, resolveUpdateSource} = require('../main/update-sou
 const LEGACY_EARLY = 'https://hubproxy.khbit.cn/https://github.com/daizihan233/ElectronClassSchedule/releases/latest/download'
 const LEGACY_IA32 = 'https://hubproxy.khbit.cn/https://github.com/daizihan233/AstraSchedule/releases/latest/download'
 const LEGACY_WIN10 = 'https://hubproxy.khbit.cn/https://github.com/AstraSchedule/desktop/releases/latest/download'
+// 过渡期默认源（曾随 v202609.26.145 发布）
+const LEGACY_INTERIM = 'https://yanmo-objects.cn-nb1.rains3.com/AstraSchedule/latest/'
 
 test('未配置过更新源时使用新默认源', () => {
     assert.deepStrictEqual(resolveUpdateSource(undefined), {url: DEFAULT_UPDATE_MIRROR, usingDefault: true, migrated: false})
@@ -26,7 +28,7 @@ test('已是新默认源时保持不变', () => {
 })
 
 test('旧的 hubproxy 源（含历史持久化值）自动迁移到新默认源', () => {
-    for (const legacy of [LEGACY_EARLY, LEGACY_IA32, LEGACY_WIN10]) {
+    for (const legacy of [LEGACY_EARLY, LEGACY_IA32, LEGACY_WIN10, LEGACY_INTERIM]) {
         const r = resolveUpdateSource(legacy)
         assert.strictEqual(r.url, DEFAULT_UPDATE_MIRROR, legacy)
         assert.strictEqual(r.usingDefault, true, legacy)
