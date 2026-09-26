@@ -33,11 +33,18 @@ test('旧的 hubproxy 源（含历史持久化值）自动迁移到新默认源'
 })
 
 test('自定义更新源一律保留', () => {
-    for (const custom of ['https://cdn.example.com/app', 'https://yanmo-objects.cn-nb1.rains3.com/AstraSchedule/202609.26.144/']) {
+    const customs = [
+        'https://cdn.example.com/app',
+        'https://yanmo-objects.cn-nb1.rains3.com/AstraSchedule/202609.26.144/',
+        // 同一台 hubproxy 上的自定义路径 / 第三方仓库代理都不算历史默认源，必须保留
+        'https://hubproxy.khbit.cn/mirror/app',
+        'https://hubproxy.khbit.cn/https://github.com/other/repo/releases/latest/download'
+    ]
+    for (const custom of customs) {
         const r = resolveUpdateSource(custom)
         assert.strictEqual(r.url, custom)
-        assert.strictEqual(r.usingDefault, false)
-        assert.strictEqual(r.migrated, false)
+        assert.strictEqual(r.usingDefault, false, custom)
+        assert.strictEqual(r.migrated, false, custom)
     }
 })
 

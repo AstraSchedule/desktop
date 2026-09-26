@@ -8,15 +8,20 @@
 
 const DEFAULT_UPDATE_MIRROR = 'https://yanmo-objects.cn-nb1.rains3.com/AstraSchedule/latest/'
 
-// 需要迁移的历史默认源主机：hubproxy 只用于代理 GitHub 发布地址
-const LEGACY_MIRROR_HOSTS = ['hubproxy.khbit.cn']
+// 需要迁移的历史默认源：hubproxy 代理本仓库的 GitHub 发布地址。
+// 只按「已知的历史默认地址形态」匹配（主机 + 本仓库 releases 代理路径），不按主机一刀切，
+// 否则用户自行配置的其它 hubproxy 路径会被替换成默认源而丢配置（CodeRabbit 意见 #5）。
+const LEGACY_MIRROR_HOST = 'hubproxy.khbit.cn'
+const LEGACY_MIRROR_PATH = /^\/https?:\/\/github\.com\/(daizihan233\/AstraSchedule|AstraSchedule\/desktop)\/releases\//
 
-function hostOf(url) {
+function isLegacyMirror(url) {
+    let parsed
     try {
-        return new URL(url).hostname
+        parsed = new URL(url)
     } catch {
-        return ''
+        return false
     }
+    return parsed.hostname === LEGACY_MIRROR_HOST && LEGACY_MIRROR_PATH.test(parsed.pathname)
 }
 
 // 解析最终生效的更新源。
@@ -26,10 +31,10 @@ function resolveUpdateSource(stored) {
     const raw = typeof stored === 'string' ? stored.trim() : ''
     if (!raw) return {url: DEFAULT_UPDATE_MIRROR, usingDefault: true, migrated: false}
     if (raw === DEFAULT_UPDATE_MIRROR) return {url: raw, usingDefault: true, migrated: false}
-    if (LEGACY_MIRROR_HOSTS.includes(hostOf(raw))) {
+    if (isLegacyMirror(raw)) {
         return {url: DEFAULT_UPDATE_MIRROR, usingDefault: true, migrated: true}
     }
     return {url: raw, usingDefault: false, migrated: false}
 }
 
-module.exports = {DEFAULT_UPDATE_MIRROR, LEGACY_MIRROR_HOSTS, resolveUpdateSource}
+module.exports = {DEFAULT_UPDATE_MIRROR, isLegacyMirror, resolveUpdateSource}
