@@ -22,7 +22,7 @@ test('旧格式纯数字版本复用', () => {
 });
 
 test('占位值与非法串不复用', () => {
-    for (const bad of ['latest', '', 'v1', '1:2:3:4a', ' ', '1.2']) {
+    for (const bad of ['latest', '', 'v1', '1:2:3:4', '1:2:3:4a', ' ', '1.2']) {
         assert.strictEqual(pickReusableVersion([{ version: bad }]), null, `不应复用 ${JSON.stringify(bad)}`)
     }
     assert.strictEqual(pickReusableVersion([{}]), null)

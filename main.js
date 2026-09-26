@@ -1141,6 +1141,9 @@ app.whenReady().then(() => {
     setupAutoUpdater()
     // 先复用上次的版本号，再做网络检查与拉取：否则首包恒为 version=0，边缘缓存全部落空
     restoreVersionTokenFromCache()
+    // 先显示本地缓存：带上缓存版本后服务端很可能直接回 304，那条分支不会加载缓存，
+    // 冷启动就会出现「拿到 304 却没有课表可显示」。放在网络检查之前，窗口先有内容。
+    loadScheduleFromCache('startup')
     // 先进行网络连接检查，然后获取课表数据
     getScheduleFromCloudWithRetry().then(() => {});
     refreshCountdownWindow('startup').catch(() => {

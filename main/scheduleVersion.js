@@ -7,8 +7,8 @@
 // 这里只做「从本地版本索引里挑一个能用的版本串」这一件事，便于单测；
 // 拿它去赋值、发请求的动作留在 main.js。
 
-/** 版本串形如 dataVersion:weekNumber[:boundary]；旧格式是纯数字 */
-const VERSION_PATTERN = /^\d+(:\d+)*$/;
+/** 版本串形如 dataVersion:weekNumber[:boundary]（最多三段）；旧格式是纯数字 */
+const VERSION_PATTERN = /^\d+(:\d+){0,2}$/;
 
 /**
  * 从离线缓存的版本索引里挑出可复用的版本号。
