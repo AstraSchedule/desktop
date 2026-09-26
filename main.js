@@ -9,6 +9,7 @@ const prompt = require('electron-prompt');
 const Store = require('electron-store');
 const store = new Store();
 const clientConfig = require('./main/clientConfig');
+const {shouldAttemptInstall, recordAttempt, STORE_KEY} = require('./main/updater-guard');
 
 // 安装器可在安装目录写入一次性初始化文件。仅打包应用读取，避免开发目录中的文件
 // 意外影响开发配置；导入成功后删除文件，后续运行完全依赖 electron-store。
@@ -734,7 +735,10 @@ function setupAutoUpdater() {
             autoUpdater.allowDowngrade = false
         }
         autoUpdater.autoDownload = true
-        autoUpdater.autoInstallOnAppQuit = true
+        // 安装只能走下面通过判定后的 quitAndInstall：开启 autoInstallOnAppQuit 时，
+        // 已下载的更新会在用户退出应用时被 electron-updater 自行安装，
+        // 等于绕开环路保护（CodeRabbit 意见 #4）
+        autoUpdater.autoInstallOnAppQuit = false
         autoUpdater.allowPrerelease = true
         autoUpdater.on('checking-for-update', () => console.log('[Updater] checking-for-update'))
         autoUpdater.on('update-available', (info) => {
@@ -747,8 +751,18 @@ function setupAutoUpdater() {
             const percent = Math.floor(p.percent || 0)
             tray?.setToolTip(`星程 - 更新下载中 ${percent}%`)
         })
-        autoUpdater.on('update-downloaded', () => {
+        autoUpdater.on('update-downloaded', (info) => {
+            const target = String(info?.version || '')
+            const current = String(app.getVersion())
+            // 同一目标版本装完仍停在旧版本，说明安装没生效（更新源目录常残留旧安装包/旧 yml），
+            // 继续 quitAndInstall 只会无限重启：停手并暴露原因
+            if (!shouldAttemptInstall(target, current, store.get(STORE_KEY))) {
+                console.error(`[Updater] ${target} 已尝试安装但版本未变化，停止自动安装以避免无限重启`)
+                tray?.setToolTip(`星程 - 更新未生效，请检查更新源（当前 ${current}）`)
+                return
+            }
             tray?.setToolTip(`星程 - 更新可用`)
+            store.set(STORE_KEY, recordAttempt(target, current))
             autoUpdater.quitAndInstall(true, true)
         })
         // 仅启动时检查一次
