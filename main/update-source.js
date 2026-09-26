@@ -6,13 +6,19 @@
 // 且「是否使用默认源」判定不成立，Win10+ 客户端也拿不到 win10.yml。
 // 用户自行配置的其它更新源一律不动。
 
-const DEFAULT_UPDATE_MIRROR = 'https://yanmo-objects.cn-nb1.rains3.com/AstraSchedule/latest/'
+const DEFAULT_UPDATE_MIRROR = 'https://ningbo.rainyun.oss.ymbit.cn/AstraSchedule/latest/'
 
 // 需要迁移的历史默认源：hubproxy 代理本仓库的 GitHub 发布地址。
 // 只按「已知的历史默认地址形态」匹配（主机 + 本仓库 releases 代理路径），不按主机一刀切，
 // 否则用户自行配置的其它 hubproxy 路径会被替换成默认源而丢配置（CodeRabbit 意见 #5）。
+// 仓库改过两次名（GitHub 自动重定向），三个名字都出现过在客户端的默认源里：
+//   daizihan233/ElectronClassSchedule → daizihan233/AstraSchedule → AstraSchedule/desktop
 const LEGACY_MIRROR_HOST = 'hubproxy.khbit.cn'
-const LEGACY_MIRROR_PATH = /^\/https?:\/\/github\.com\/(daizihan233\/AstraSchedule|AstraSchedule\/desktop)\/releases\//
+const LEGACY_MIRROR_PATH = /^\/https?:\/\/github\.com\/(daizihan233\/(ElectronClassSchedule|AstraSchedule)|AstraSchedule\/desktop)\/releases\//
+// 过渡期默认源：曾随 v202609.26.145 发布，客户端启动时会把它写回 electron-store。
+// 只认这个默认地址本身（主机 + 默认路径），该主机上的其它路径仍算用户自定义源（CodeRabbit 意见 #6）。
+const INTERIM_MIRROR_HOST = 'yanmo-objects.cn-nb1.rains3.com'
+const INTERIM_MIRROR_PATH = '/AstraSchedule/latest/'
 
 function isLegacyMirror(url) {
     let parsed
@@ -21,6 +27,7 @@ function isLegacyMirror(url) {
     } catch {
         return false
     }
+    if (parsed.hostname === INTERIM_MIRROR_HOST && parsed.pathname === INTERIM_MIRROR_PATH) return true
     return parsed.hostname === LEGACY_MIRROR_HOST && LEGACY_MIRROR_PATH.test(parsed.pathname)
 }
 
