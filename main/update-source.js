@@ -6,7 +6,7 @@
 // 且「是否使用默认源」判定不成立，Win10+ 客户端也拿不到 win10.yml。
 // 用户自行配置的其它更新源一律不动。
 
-const DEFAULT_UPDATE_MIRROR = 'https://yanmo-objects.cn-nb1.rains3.com/AstraSchedule/latest/'
+const DEFAULT_UPDATE_MIRROR = 'https://ningbo.rainyun.oss.ymbit.cn/AstraSchedule/latest/'
 
 // 需要迁移的历史默认源：hubproxy 代理本仓库的 GitHub 发布地址。
 // 只按「已知的历史默认地址形态」匹配（主机 + 本仓库 releases 代理路径），不按主机一刀切，
