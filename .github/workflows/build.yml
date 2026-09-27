@@ -179,6 +179,20 @@ jobs:
           Push-OSS $installer.FullName "AstraSchedule/latest/$($installer.Name)"
           Push-OSS $yml.FullName "AstraSchedule/latest/$channelFile"
 
+          # 差量更新（electron-updater 的 blockmap 差分）要求安装包旁边有同名 .blockmap：
+          # 少了它，每次更新都会差量失败、回落到全量下载（Win10 通道约 128MB）。
+          $blockmap = Get-ChildItem -Path dist -File | Where-Object { $_.Name -eq ($installer.Name + '.blockmap') } | Select-Object -First 1
+          $blockmapArchived = $false
+          if ($blockmap) {
+            Push-OSS $blockmap.FullName "AstraSchedule/$ver/$($blockmap.Name)"
+            $blockmapArchived = $true
+          } else {
+            Write-Warning "未找到 $($installer.Name).blockmap：本次发布的差量更新将不可用"
+          }
+          if ($blockmapArchived) {
+            Push-OSS $blockmap.FullName "AstraSchedule/latest/$($blockmap.Name)"
+          }
+
           # 别名（官网/注册中心的固定下载链接用的就是这个名字）：hubproxy 关停后由 ESA
           # 重定向按文件名映射到这里，缺了它那些旧链接会 404
           $aliasPath = "dist/${{ matrix.installer_alias }}"
@@ -242,7 +256,9 @@ jobs:
             "${prefix}latest.yml",
             "${prefix}win10.yml",
             "${prefix}AstraSchedule-Setup-$ver.exe",
+            "${prefix}AstraSchedule-Setup-$ver.exe.blockmap",
             "${prefix}AstraSchedule-Setup-Win10-$ver.exe",
+            "${prefix}AstraSchedule-Setup-Win10-$ver.exe.blockmap",
             "${prefix}AstraScheduleInstaller.exe",
             "${prefix}AstraScheduleInstallerWin10.exe"
           )
