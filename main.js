@@ -837,6 +837,29 @@ function checkNetworkConnection() {
 
 // 云端不可用时回落到本地缓存。只在还没有任何可用配置时才使用
 // （冷启动、或首次拉取就失败），避免用旧缓存覆盖正在显示的课表。
+// 按课表配置决定 WebSocket 连接。2xx 与 304（缓存命中）两条路径共用：
+// 冷启动返回 304 时也必须走到这里，否则缓存里若声明 supportWebSocket，
+// 客户端会显示缓存课表却收不到 SyncConfig 广播。
+function initializeWebSocketForSchedule(scheduleConfig) {
+    const supportWebSocket = scheduleConfig["supportWebSocket"] !== undefined ?
+        Boolean(scheduleConfig["supportWebSocket"]) : true;
+    console.log(`[WebSocket] supportWebSocket=${supportWebSocket}, hasInitialized=${hasInitializedWebSocket}`);
+    websocketDisabled = !supportWebSocket; // 更新全局状态
+    if (!supportWebSocket) {
+        // 不支持 WebSocket：断开现有连接并停止重连机制
+        console.log('[WebSocket] Server does not support WebSocket, disconnecting...');
+        disconnectWebSocket();
+        // 无论如何都要更新 Tooltip 状态，确保 Serverless 提示正确显示
+        updateTrayTooltip(false, true);
+    } else if (!hasInitializedWebSocket || !ws || ws.readyState !== WebSocket.OPEN) {
+        console.log('[WebSocket] Server supports WebSocket, connecting...');
+        if (!hasInitializedWebSocket) {
+            hasInitializedWebSocket = true;
+        }
+        connect();
+    }
+}
+
 // markOffline=false 用于「服务端已确认可用」的场景（如 304）：此时只是把本地内容
 // 显示出来，并不是离线回落，标成离线会让托盘错误地显示「离线/缓存」。
 function loadScheduleFromCache(reason, { markOffline = true } = {}) {
@@ -851,10 +874,13 @@ function loadScheduleFromCache(reason, { markOffline = true } = {}) {
         return false
     }
 
+    // 来源总是记录：窗口显示的就是缓存内容，这是事实，与「在线/离线」无关。
+    // 否则收到 304（服务端确认可用）后若后续请求失败，lastScheduleConfig 已存在、
+    // 缓存加载器不会再补设来源，托盘会误报「无可用缓存」。
+    lastScheduleSource = 'cache'
     if (markOffline) {
         // 先落来源再改离线状态：setOfflineStatus 会在状态变化时同步触发托盘刷新，
         // 顺序反了那次刷新会读到旧的 lastScheduleSource，提示就变成上一句
-        lastScheduleSource = 'cache'
         offlineCache.setOfflineStatus(true)
     }
     lastScheduleConfig = cachedData.data
@@ -1009,7 +1035,16 @@ function getScheduleFromCloud() {
             console.log('Schedule not modified (304), server confirmed the version we hold');
             // 304 表示服务端确认「本地这份就是最新」，此时才把缓存内容显示出来：
             // 仍是先询问服务端、拿到确认，不存在提前显示。
-            loadScheduleFromCache('http-304', { markOffline: false })
+            if (!loadScheduleFromCache('http-304', { markOffline: false })) {
+                // 本地缓存不存在或不可读：这个版本令牌不可复用（它指向的配置拿不到），
+                // 清掉它并立即完整拉取一次，否则冷启动会既没有课表、也不会补拉。
+                currentVersionToken = '0'
+                getScheduleFromCloud()
+                return
+            }
+            // 缓存加载成功：与 2xx 路径一样按配置决定 WebSocket，
+            // 否则缓存里声明 supportWebSocket 时收不到 SyncConfig 广播。
+            initializeWebSocketForSchedule(lastScheduleConfig)
             // 能拿到 304 说明服务端可达：离线状态与失败退避都要复位，
             // 否则「离线期间服务端无改动 → 恢复后首个请求命中 304」会让客户端一直显示离线
             offlineCache.setOfflineStatus(false)
@@ -1065,28 +1100,7 @@ function getScheduleFromCloud() {
                     }
                 }
 
-                // 检查是否含有 supportWebSocket 键
-                const supportWebSocket = scheduleConfigSync["supportWebSocket"] !== undefined ?
-                    Boolean(scheduleConfigSync["supportWebSocket"]) : true;
-
-                console.log(`[WebSocket] supportWebSocket=${supportWebSocket}, hasInitialized=${hasInitializedWebSocket}`);
-
-                // 根据 supportWebSocket 值决定是否连接 WebSocket
-                websocketDisabled = !supportWebSocket; // 更新全局状态
-
-                if (!supportWebSocket) {
-                    // 如果不支持 WebSocket，则断开现有连接并停止重连机制
-                    console.log('[WebSocket] Server does not support WebSocket, disconnecting...');
-                    disconnectWebSocket();
-                    // 无论如何都要更新 Tooltip 状态，确保 Serverless 提示正确显示
-                    updateTrayTooltip(false, true);
-                } else if (!hasInitializedWebSocket || !ws || ws.readyState !== WebSocket.OPEN) {
-                    console.log('[WebSocket] Server supports WebSocket, connecting...');
-                    if (!hasInitializedWebSocket) {
-                        hasInitializedWebSocket = true;
-                    }
-                    connect();
-                }
+                initializeWebSocketForSchedule(scheduleConfigSync)
 
                 // 缓存倒数日数据，供 countdown 窗口使用
                 countdownState.scheduleCountdownRecords = Array.isArray(scheduleConfigSync.countdown_records)
