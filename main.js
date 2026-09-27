@@ -837,7 +837,9 @@ function checkNetworkConnection() {
 
 // 云端不可用时回落到本地缓存。只在还没有任何可用配置时才使用
 // （冷启动、或首次拉取就失败），避免用旧缓存覆盖正在显示的课表。
-function loadScheduleFromCache(reason) {
+// markOffline=false 用于「服务端已确认可用」的场景（如 304）：此时只是把本地内容
+// 显示出来，并不是离线回落，标成离线会让托盘错误地显示「离线/缓存」。
+function loadScheduleFromCache(reason, { markOffline = true } = {}) {
     if (lastScheduleConfig) return false
     if (!offlineCache.hasCachedData()) {
         console.log(`[OfflineCache] No cached schedule to fall back to (${reason})`)
@@ -849,10 +851,12 @@ function loadScheduleFromCache(reason) {
         return false
     }
 
-    // 先落来源再改离线状态：setOfflineStatus 会在状态变化时同步触发托盘刷新，
-    // 顺序反了那次刷新会读到旧的 lastScheduleSource，提示就变成上一句
-    lastScheduleSource = 'cache'
-    offlineCache.setOfflineStatus(true)
+    if (markOffline) {
+        // 先落来源再改离线状态：setOfflineStatus 会在状态变化时同步触发托盘刷新，
+        // 顺序反了那次刷新会读到旧的 lastScheduleSource，提示就变成上一句
+        lastScheduleSource = 'cache'
+        offlineCache.setOfflineStatus(true)
+    }
     lastScheduleConfig = cachedData.data
     countdownState.scheduleCountdownRecords = Array.isArray(cachedData.data.countdown_records)
         ? cachedData.data.countdown_records
@@ -1002,7 +1006,10 @@ function getScheduleFromCloud() {
 
         // 处理 304 状态码
         if (statusCode === 304) {
-            console.log('Schedule not modified (304), no action taken');
+            console.log('Schedule not modified (304), server confirmed the version we hold');
+            // 304 表示服务端确认「本地这份就是最新」，此时才把缓存内容显示出来：
+            // 仍是先询问服务端、拿到确认，不存在提前显示。
+            loadScheduleFromCache('http-304', { markOffline: false })
             // 能拿到 304 说明服务端可达：离线状态与失败退避都要复位，
             // 否则「离线期间服务端无改动 → 恢复后首个请求命中 304」会让客户端一直显示离线
             offlineCache.setOfflineStatus(false)
@@ -1141,9 +1148,6 @@ app.whenReady().then(() => {
     setupAutoUpdater()
     // 先复用上次的版本号，再做网络检查与拉取：否则首包恒为 version=0，边缘缓存全部落空
     restoreVersionTokenFromCache()
-    // 先显示本地缓存：带上缓存版本后服务端很可能直接回 304，那条分支不会加载缓存，
-    // 冷启动就会出现「拿到 304 却没有课表可显示」。放在网络检查之前，窗口先有内容。
-    loadScheduleFromCache('startup')
     // 先进行网络连接检查，然后获取课表数据
     getScheduleFromCloudWithRetry().then(() => {});
     refreshCountdownWindow('startup').catch(() => {
