@@ -459,7 +459,7 @@ function tick(reset = false) {
         setBackgroundDisplay()
         // 天气与课表配置的触发条件不同，不能合并判断：天气不参与任何反馈回路，
         // 重绘时也要刷新。启动时云端配置往往早于第一次周期 tick 到达，天气请求正是搭在
-        // 这条重绘路径上，若只由时间驱动的日程变化触发，客户端会一直停在默认的 000℃
+        // 这条重绘路径上，若只由时间驱动的日程变化触发，客户端会一直停在空白占位
         ipcRenderer.send('getWeather', false)
         // 课表拉取只由时间驱动的日程变化触发：临时调课等本地改动会先改 scheduleArray
         // 再调用 tick(true)，此时 stateChanged 同样为真，但拉取会与配置下发构成自激回路
