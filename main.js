@@ -1374,7 +1374,7 @@ ipcMain.on('getWeekIndex', (e, arg) => {
             label: '更新课表',
             click: () => {
                 // 与 Serverless 模式一致：直接拉取课表（服务端已废弃外部广播入口）
-                // 与渲染进程的「更新课表」一致：手动更新一律绕过边缘缓存的版本判断（version=0）
+                // 与渲染进程按日程切换的强制拉取一致：手动更新一律绕过边缘缓存的版本判断（version=0）
                 getScheduleFromCloud({ force: true });
             }
         },
@@ -1897,7 +1897,8 @@ ipcMain.on('setClass', (e, arg) => {
 
 // 添加 IPC 事件处理器，用于处理来自渲染进程的 getScheduleFromCloud 请求
 ipcMain.on('getScheduleFromCloud', () => {
-    // 渲染进程的「更新课表」要的是最新数据：本次请求绕过边缘缓存的版本判断（version=0）。
+    // 渲染进程按日程状态变化送来的强制拉取（js/renderer.js:466-468，tick 每秒运行）：
+    // 本次请求绕过边缘缓存的版本判断（version=0）。
     // 不改写 currentVersionToken —— 请求失败时仍保留手里的版本，不会白白丢掉边缘命中
     getScheduleFromCloud({ force: true });
 });
