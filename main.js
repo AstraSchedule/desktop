@@ -554,7 +554,9 @@ function connect(rejectUnauthorized = true) {
         console.log('Received from server:', text)
         if (text === 'SyncConfig') {
             console.log('SyncConfig')
-            getScheduleFromCloud()
+            // 服务端配置变了才推 SyncConfig：强制回源。带手里的令牌可能命中边缘上的陈旧条目拿到 304，
+            // 把这次变更吞掉，要等下一次日程状态变化才纠正。
+            getScheduleFromCloud({ force: true })
             refreshCountdownWindow('ws-sync').catch(() => {
             })
         }
@@ -1016,10 +1018,11 @@ function restoreVersionTokenFromCache() {
     }
 }
 
-function getScheduleFromCloud() {
+function getScheduleFromCloud({ force = false } = {}) {
     const { agreement } = getProtocols()
-    // 添加 version 查询参数
-    const url = `${agreement}://${getServer()}/${classId}?version=${encodeURIComponent(currentVersionToken)}`
+    // 添加 version 查询参数：force 只影响本次请求，不改写 currentVersionToken（见 main/scheduleVersion.js）
+    const requestVersion = resolveRequestVersion(force, currentVersionToken)
+    const url = `${agreement}://${getServer()}/${classId}?version=${encodeURIComponent(requestVersion)}`
     console.log('Requesting schedule from cloud:', url);
 
     // 本次请求的序号，响应到达时校验是否仍为最新请求
@@ -1162,7 +1165,7 @@ function getScheduleFromCloud() {
     })
     request.end()
 }
-const { pickReusableVersion } = require('./main/scheduleVersion');
+const { pickReusableVersion, resolveRequestVersion } = require('./main/scheduleVersion');
 const { startAeroMonitoring, stopAeroMonitoring } = require('./main/aeroCheck');
 
 app.whenReady().then(() => {
@@ -1364,8 +1367,9 @@ ipcMain.on('getWeekIndex', (e, arg) => {
             icon: asset('image', 'toggle.png'),
             label: '更新课表',
             click: () => {
-                // 与 Serverless 模式一致：直接拉取课表（服务端已废弃外部广播入口）
-                getScheduleFromCloud();
+                // 用户显式要求刷新：带 version=0 强制回源，不复用边缘缓存。
+                // 只带手里的令牌时，若边缘上的条目正好是同一个令牌，会答 304，用户点了也顶不掉陈旧数据。
+                getScheduleFromCloud({ force: true });
             }
         },
         {
