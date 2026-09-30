@@ -11,6 +11,7 @@ const store = new Store();
 const clientConfig = require('./main/clientConfig');
 const {shouldAttemptInstall, recordAttempt, STORE_KEY} = require('./main/updater-guard');
 const {DEFAULT_UPDATE_MIRROR, resolveUpdateSource} = require('./main/update-source');
+const {createRevalidateScheduler} = require('./main/scheduleRevalidate');
 
 // 安装器可在安装目录写入一次性初始化文件。仅打包应用读取，避免开发目录中的文件
 // 意外影响开发配置；导入成功后删除文件，后续运行完全依赖 electron-store。
@@ -548,7 +549,8 @@ function connect(rejectUnauthorized = true) {
         console.log('Received from server:', text)
         if (text === 'SyncConfig') {
             console.log('SyncConfig')
-            getScheduleFromCloud()
+            // 服务端主动推送变更：强制绕过边缘缓存的版本判断，保证拿到最新配置
+            getScheduleFromCloud({ force: true })
             refreshCountdownWindow('ws-sync').catch(() => {
             })
         }
@@ -953,6 +955,17 @@ let scheduleRetryDelayMs = SCHEDULE_RETRY_BASE_DELAY_MS
 // 当前是否处于边缘限流状态；非 0 时走上面那条更长的独立退避序列
 let edgeBlockRetryDelayMs = 0
 
+// 收到 304 之后按固定节奏重新校验一次。边缘缓存只会用它手里的版本答 304，而它手里的版本
+// 可能比源站旧（到期时刻最长 600 秒软过期，见 esa-edge-cache），客户端又不会主动再问——
+// 不补这一拍就停在旧课表，直到下一次推送或重连。复核仍带当前版本令牌（命中 304 几乎零成本），
+// 只有真的变了才会拿到 2xx。
+const SCHEDULE_REVALIDATE_DELAY_MS = 5 * 60 * 1000
+// 同一时刻只留一个待执行复核：WS 推送、托盘连点、离线恢复都会各自触发拉取
+const scheduleRevalidate = createRevalidateScheduler(
+    SCHEDULE_REVALIDATE_DELAY_MS,
+    () => getScheduleFromCloud()
+)
+
 // 识别边缘节点（CDN/WAF）的拦截响应，例如阿里云 ESA 限流：
 // X-Tengine-Error: denied by http_ratelimit。
 // 只认这个响应头：它是边缘节点自己生成拦截页的确定性标志，而 Server: ESA
@@ -1002,10 +1015,16 @@ function restoreVersionTokenFromCache() {
     }
 }
 
-function getScheduleFromCloud() {
+function getScheduleFromCloud({ force = false } = {}) {
     const { agreement } = getProtocols()
-    // 添加 version 查询参数
-    const url = `${agreement}://${getServer()}/${classId}?version=${encodeURIComponent(currentVersionToken)}`
+    // 新一轮拉取取代待执行的复核，避免重复请求
+    scheduleRevalidate.cancel()
+    // 添加 version 查询参数。force 只影响本次请求：服务端明确推送了变更（SyncConfig）时，
+    // 必须绕过边缘缓存的版本判断，否则边缘会拿陈旧版本答 304，把这次刷新挡回去。
+    // 令牌用 '0' 表示「我手里什么都没有」，源站会算一份最新的 200；不能改成当前令牌，
+    // 那是「我手里这份就是最新」的声明，冒充它就等于放弃这次刷新。
+    const requestVersion = force ? '0' : currentVersionToken
+    const url = `${agreement}://${getServer()}/${classId}?version=${encodeURIComponent(requestVersion)}`
     console.log('Requesting schedule from cloud:', url);
 
     // 本次请求的序号，响应到达时校验是否仍为最新请求
@@ -1049,6 +1068,9 @@ function getScheduleFromCloud() {
             // 否则「离线期间服务端无改动 → 恢复后首个请求命中 304」会让客户端一直显示离线
             offlineCache.setOfflineStatus(false)
             resetScheduleRetryBackoff()
+            // 304 也可能是边缘缓存自己答的（它手里的版本可能比源站旧）：排一次复核，
+            // 真变了就会拿到 2xx 并刷新界面，不会停在旧课表
+            scheduleRevalidate.arm()
             return;
         }
 
@@ -1874,8 +1896,7 @@ ipcMain.on('setClass', (e, arg) => {
 
 // 添加 IPC 事件处理器，用于处理来自渲染进程的 getScheduleFromCloud 请求
 ipcMain.on('getScheduleFromCloud', () => {
-    // 渲染进程的「更新课表」要的是最新数据：版本归零强制回源，不复用边缘缓存
-    currentVersionToken = '0'
-    // 直接调用 getScheduleFromCloud 函数
-    getScheduleFromCloud();
+    // 渲染进程的「更新课表」要的是最新数据：本次请求绕过边缘缓存的版本判断（version=0）。
+    // 不改写 currentVersionToken —— 请求失败时仍保留手里的版本，不会白白丢掉边缘命中
+    getScheduleFromCloud({ force: true });
 });
