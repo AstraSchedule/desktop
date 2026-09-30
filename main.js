@@ -1374,7 +1374,8 @@ ipcMain.on('getWeekIndex', (e, arg) => {
             label: '更新课表',
             click: () => {
                 // 与 Serverless 模式一致：直接拉取课表（服务端已废弃外部广播入口）
-                getScheduleFromCloud();
+                // 与渲染进程的「更新课表」一致：手动更新一律绕过边缘缓存的版本判断（version=0）
+                getScheduleFromCloud({ force: true });
             }
         },
         {
