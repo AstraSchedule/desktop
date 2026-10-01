@@ -554,9 +554,9 @@ function connect(rejectUnauthorized = true) {
         console.log('Received from server:', text)
         if (text === 'SyncConfig') {
             console.log('SyncConfig')
-            // 服务端配置变了才推 SyncConfig：强制回源。带手里的令牌可能命中边缘上的陈旧条目拿到 304，
-            // 把这次变更吞掉，要等下一次日程状态变化才纠正。
-            getScheduleFromCloud({ force: true })
+            // 服务端配置变了才推 SyncConfig：带手里的版本令牌，由边缘按版本决定是否回源。
+            // 强制回源只留给托盘「更新课表」那一次人为操作（见 main/scheduleVersion.js）。
+            getScheduleFromCloud()
             refreshCountdownWindow('ws-sync').catch(() => {
             })
         }
@@ -1053,10 +1053,10 @@ function getScheduleFromCloud({ force = false } = {}) {
             // 304 表示服务端确认「本地这份就是最新」，此时才把缓存内容显示出来：
             // 仍是先询问服务端、拿到确认，不存在提前显示。
             if (!loadScheduleFromCache('http-304', { markOffline: false })) {
-                // 本地缓存不存在或不可读：这个版本令牌不可复用（它指向的配置拿不到），
-                // 清掉它并立即完整拉取一次，否则冷启动会既没有课表、也不会补拉。
-                currentVersionToken = '0'
-                getScheduleFromCloud()
+                // 本地缓存不存在或不可读：这个版本令牌指向的配置拿不到，本次必须完整拉一次，
+                // 否则冷启动会既没有课表、也不会补拉。只对这一次请求生效（force 不改写令牌）：
+                // 令牌本身未必失效，持久归零会让后续自动请求全部绕过边缘缓存。
+                getScheduleFromCloud({ force: true })
                 return
             }
             // 缓存加载成功：与 2xx 路径一样按配置决定 WebSocket，
@@ -1889,9 +1889,9 @@ ipcMain.on('setClass', (e, arg) => {
 })
 
 // 添加 IPC 事件处理器，用于处理来自渲染进程的 getScheduleFromCloud 请求
+// （渲染进程在进入下一个日程时发送，见 js/renderer.js 的 tick）
 ipcMain.on('getScheduleFromCloud', () => {
-    // 渲染进程的「更新课表」要的是最新数据：版本归零强制回源，不复用边缘缓存
-    currentVersionToken = '0'
-    // 直接调用 getScheduleFromCloud 函数
+    // 自动触发的轮询：带手里的版本令牌，由边缘按版本决定是否回源。
+    // 只有用户点击托盘「更新课表」那一次人为操作才带 version=0 强制回源。
     getScheduleFromCloud();
 });
