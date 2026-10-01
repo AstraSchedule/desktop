@@ -24,4 +24,18 @@ function pickReusableVersion(versions) {
     return VERSION_PATTERN.test(candidate) ? candidate : null
 }
 
-module.exports = { pickReusableVersion, VERSION_PATTERN };
+/**
+ * 本次请求该带哪个版本号。
+ *
+ * 默认带手里的令牌，让边缘（ESA）按版本号命中缓存；调用方显式要求刷新时带 '0'，
+ * 保证这一次一定回源。只决定这一次请求发什么，不改写调用方手里的令牌——
+ * 请求失败时不会留下副作用。
+ * @param {boolean} force 本次是否强制回源
+ * @param {string} token 手里的版本令牌
+ * @returns {string}
+ */
+function resolveRequestVersion(force, token) {
+    return force ? '0' : token
+}
+
+module.exports = { pickReusableVersion, resolveRequestVersion, VERSION_PATTERN };
