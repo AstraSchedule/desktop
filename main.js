@@ -12,6 +12,7 @@ const clientConfig = require('./main/clientConfig');
 const {shouldAttemptInstall, recordAttempt, STORE_KEY} = require('./main/updater-guard');
 const {DEFAULT_UPDATE_MIRROR, resolveUpdateSource} = require('./main/update-source');
 const {retryUntilConnected} = require('./main/scheduleRetry');
+const {clientUserAgent} = require('./main/client-ua');
 
 // 安装器可在安装目录写入一次性初始化文件。仅打包应用读取，避免开发目录中的文件
 // 意外影响开发配置；导入成功后删除文件，后续运行完全依赖 electron-store。
@@ -222,10 +223,13 @@ function getServer() {
 // 没有它，半开连接会让「无响应」永远不收敛（天气请求中标志、兜底显示判定都会卡死）
 const ASTRA_REQUEST_TIMEOUT_MS = 20000
 
+// 客户端所有出站请求（更新下载除外）统一 UA，见 main/client-ua.js
+const CLIENT_USER_AGENT = clientUserAgent(app.getVersion())
+
 // 统一 HTTP 请求，注入 User-Agent，不请求客户端证书（mTLS）
 function astraRequest(options) {
     const https = require('node:https')
-    const ua = `AstraSchedule/${app.getVersion()}`
+    const ua = CLIENT_USER_AGENT
     const url = typeof options === 'string' ? options : options.url
     const method = (typeof options === 'object' ? options.method : null) || 'GET'
     const headers = { 'User-Agent': ua, ...(typeof options === 'object' ? (options.headers || {}) : {}) }
@@ -258,6 +262,7 @@ const countdownCtx = {
     screen,
     ipcMain,
     net: electron.net,
+    userAgent: CLIENT_USER_AGENT,
     state: countdownState,
     getClassId: () => classId,
 };
@@ -480,7 +485,7 @@ function connect(rejectUnauthorized = true) {
         } catch {
         }
         clearHeartbeat()
-        ws = new WebSocket(url, [], {rejectUnauthorized})
+        ws = new WebSocket(url, [], {rejectUnauthorized, headers: {'User-Agent': CLIENT_USER_AGENT}})
         // 为WebSocket实例添加错误监听器，确保任何错误都不会导致弹窗
         // 重要：必须在WebSocket实例创建后立即添加错误监听器，以捕获所有错误
         ws.on('error', (error) => {
