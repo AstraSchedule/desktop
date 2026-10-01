@@ -11,6 +11,7 @@ const store = new Store();
 const clientConfig = require('./main/clientConfig');
 const {shouldAttemptInstall, recordAttempt, STORE_KEY} = require('./main/updater-guard');
 const {DEFAULT_UPDATE_MIRROR, resolveUpdateSource} = require('./main/update-source');
+const {retryUntilConnected} = require('./main/scheduleRetry');
 
 // 安装器可在安装目录写入一次性初始化文件。仅打包应用读取，避免开发目录中的文件
 // 意外影响开发配置；导入成功后删除文件，后续运行完全依赖 electron-store。
@@ -900,37 +901,45 @@ function loadScheduleFromCache(reason, { markOffline = true } = {}) {
     return true
 }
 
-// 重试获取课表数据的辅助函数
+// 等待固定时长
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+// 重试获取课表数据的辅助函数。重试编排在 main/scheduleRetry.js（可单测），
+// 这里只提供探测、日志与拿不到网时的离线兜底
 async function getScheduleFromCloudWithRetry(maxRetries = 10) {
-    for (let i = 0; i < maxRetries; i++) {
-        const connected = await checkNetworkConnection()
-        if (connected) {
-            console.log(`[Network] Attempt ${i + 1}/${maxRetries}: Network connected, fetching schedule...`)
+    return retryUntilConnected({
+        maxRetries,
+        isConnected: () => checkNetworkConnection(),
+        sleep: () => sleep(2000),
+        onConnected: (attempt) => {
+            console.log(`[Network] Attempt ${attempt}/${maxRetries}: Network connected, fetching schedule...`)
             getScheduleFromCloud()
-            return true
-        } else {
-            console.warn(`[Network] Attempt ${i + 1}/${maxRetries}: Network not available`)
-            if (i < maxRetries - 1) {
-                console.log(`[Network] Retrying in 2 seconds...`)
-                await new Promise(resolve => setTimeout(resolve, 2000))
+        },
+        onAttemptFailed: (attempt) => {
+            console.warn(`[Network] Attempt ${attempt}/${maxRetries}: Network not available`)
+            if (attempt < maxRetries) {
+                console.log('[Network] Retrying in 2 seconds...')
             }
-        }
-    }
-    console.error('[Network] Failed to establish network connection after', maxRetries, 'attempts')
+        },
+        onExhausted: () => {
+            console.error('[Network] Failed to establish network connection after', maxRetries, 'attempts')
 
-    // 尝试从本地缓存加载课表数据（离线模式）
-    if (loadScheduleFromCache('network-unreachable')) {
-        return false
-    }
+            // 尝试从本地缓存加载课表数据（离线模式）
+            if (loadScheduleFromCache('network-unreachable')) {
+                return
+            }
 
-    // 连续探测失败且没有缓存可用：这才是「云端确定不可用」，告知渲染进程可按本地配置兜底。
-    // 不能用首次请求失败当信号：那时重试仍在排队，窗口会过早显示占位内容
-    if (win && !win.isDestroyed()) win.webContents.send('scheduleUnavailable')
+            // 连续探测失败且没有缓存可用：这才是「云端确定不可用」，告知渲染进程可按本地配置兜底。
+            // 不能用首次请求失败当信号：那时重试仍在排队，窗口会过早显示占位内容
+            if (win && !win.isDestroyed()) win.webContents.send('scheduleUnavailable')
 
-    // 即使没有缓存数据，也继续尝试获取课表（可能在移动网络等不稳定情况下）
-    console.log('[Network] No cached data available, proceeding with schedule fetch despite network check failure')
-    getScheduleFromCloud()
-    return false
+            // 即使没有缓存数据，也继续尝试获取课表（可能在移动网络等不稳定情况下）
+            console.log('[Network] No cached data available, proceeding with schedule fetch despite network check failure')
+            getScheduleFromCloud()
+        },
+    })
 }
 
 // 课表拉取并发控制：记录最新一次请求的序号。托盘连点 / WS 推送 / 自动刷新 / 失败重试
@@ -1163,9 +1172,8 @@ app.whenReady().then(() => {
     // 先复用上次的版本号，再做网络检查与拉取：否则首包恒为 version=0，边缘缓存全部落空
     restoreVersionTokenFromCache()
     // 先进行网络连接检查，然后获取课表数据
-    getScheduleFromCloudWithRetry().then(() => {});
-    refreshCountdownWindow('startup').catch(() => {
-    })
+    void getScheduleFromCloudWithRetry();
+    void refreshCountdownWindow('startup');
     win.webContents.on('did-finish-load', () => {
         win.webContents.send('getWeekIndex');
         if (lastScheduleConfig) {
@@ -1254,7 +1262,7 @@ ipcMain.on('getWeekIndex', (e, arg) => {
                         console.log('[Updater] Mirror cancelled')
                     } else {
                         store.set('updateBaseUrl', r.toString())
-                        dialog.showMessageBox(win, {message: '更新源已保存，重启应用后生效。'}).then(doNothing)
+                        void dialog.showMessageBox(win, {message: '更新源已保存，重启应用后生效。'})
                     }
                 })
             }
@@ -1275,7 +1283,7 @@ ipcMain.on('getWeekIndex', (e, arg) => {
                 const { autoUpdater } = require('electron-updater')
                 autoUpdater.checkForUpdates().catch((err) => {
                     console.error('[Updater] manual check failed', err)
-                    dialog.showMessageBox(win, { type: 'error', message: '检查更新失败，请稍后再试。' }).then(doNothing)
+                    void dialog.showMessageBox(win, { type: 'error', message: '检查更新失败，请稍后再试。' })
                 })
             }
         },
@@ -1797,12 +1805,12 @@ ipcMain.on('debugCalibrationData', (e, arg) => {
 
                 // 应用偏移
                 win.webContents.send('setTimeOffset', offset % 10000000000000);
-                dialog.showMessageBox(win, {
+                void dialog.showMessageBox(win, {
                     type: 'info',
                     title: '调试矫正',
                     message: `已设置偏移 ${offset} 秒\n目标时间: ${targetTime} ${isBefore ? '前' : '后'} ${seconds} 秒`,
                     buttons: ['确定']
-                }).then();
+                });
             });
         });
     });
@@ -1859,8 +1867,7 @@ ipcMain.on('setClass', (e, arg) => {
         // 同步内存中的 classId，随后重连以生效
         classId = val
         console.log('[Class] set to', val)
-        refreshCountdownWindow('class-changed').catch(() => {
-        })
+        void refreshCountdownWindow('class-changed')
         try {
             ws?.close?.()
         } catch {
