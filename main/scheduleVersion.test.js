@@ -24,7 +24,7 @@ test('旧格式纯数字版本复用', () => {
 test('默认带手里的令牌，只有显式刷新才带 0', () => {
     assert.strictEqual(resolveRequestVersion(false, '1772129866:30:1800000000'), '1772129866:30:1800000000')
     assert.strictEqual(resolveRequestVersion(true, '1772129866:30:1800000000'), '0')
-    // 冷启动还没复用出版本、或刚被归零时，两种写法都发 0
+    // 冷启动还没复用出版本时令牌就是 0，两种写法都发 0
     assert.strictEqual(resolveRequestVersion(false, '0'), '0')
     assert.strictEqual(resolveRequestVersion(true, '0'), '0')
 });
