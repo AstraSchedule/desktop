@@ -73,9 +73,11 @@ function collectEffectiveSchedules(records, classId) {
     return out;
 }
 
-function requestJsonByNet(net, url) {
+function requestJsonByNet(net, url, userAgent) {
     return new Promise((resolve, reject) => {
-        const req = net.request({method: 'GET', url});
+        const options = {method: 'GET', url};
+        if (userAgent) options.headers = {'User-Agent': userAgent};
+        const req = net.request(options);
         let settled = false;
         const timeoutMs = 12000;
         const timer = setTimeout(() => {
@@ -128,12 +130,12 @@ function requestJsonByNet(net, url) {
 }
 
 async function fetchCountdownData(ctx) {
-    const {net, getServer, getProtocols, getClassId} = ctx;
+    const {net, getServer, getProtocols, getClassId, userAgent} = ctx;
     const {agreement} = getProtocols();
     const classId = getClassId();
     const url = `${agreement}://${getServer()}/web/countdown?scope=${encodeURIComponent(classId)}`;
 
-    const payload = await requestJsonByNet(net, url);
+    const payload = await requestJsonByNet(net, url, userAgent);
     if (payload?.loading === true) return {loading: true, items: []};
 
     const hasConfig = payload?.hasConfig !== undefined ? !!payload.hasConfig : true;
