@@ -129,3 +129,24 @@ test('主进程登记了 schedule-status 并把状态交给状态服务', () => 
     assert.match(handler[0], /statusServer\.update\(status\)/, '状态必须交给 statusServer.update，否则接口永远 503')
     assert.match(source, /createStatusServer\(\)/, 'main.js 应创建状态服务实例')
 })
+
+test('主进程只将非 null、非数组的对象交给状态服务', () => {
+    const source = fs.readFileSync(MAIN_JS, 'utf8')
+    const handler = source.match(/ipcMain\.on\(\s*'schedule-status'\s*,[\s\S]*?\n\}\)/)
+    assert.ok(handler, 'main.js 必须登记 ipcMain.on(schedule-status)')
+    let onStatus
+    const updates = []
+    vm.runInNewContext(handler[0], {
+        ipcMain: {on: (channel, callback) => { onStatus = callback }},
+        statusServer: {update: (status) => updates.push(status)}
+    })
+
+    for (const status of [{}, {state: 'in_class'}]) {
+        onStatus({}, status)
+        assert.strictEqual(updates.at(-1), status)
+    }
+    for (const status of [null, undefined, [], [{state: 'in_class'}], '', 'status', 0, 1, false, true]) {
+        onStatus({}, status)
+    }
+    assert.strictEqual(updates.length, 2, '非法状态不得交给状态服务')
+})

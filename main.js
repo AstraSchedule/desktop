@@ -1701,6 +1701,7 @@ ipcMain.on('update-tray-status', (e, arg) => {
 const statusServer = createStatusServer();
 
 ipcMain.on('schedule-status', (e, status) => {
+    if (status === null || typeof status !== 'object' || Array.isArray(status)) return;
     statusServer.update(status);
 })
 
