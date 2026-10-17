@@ -276,3 +276,103 @@ function formatCountdown(countdownSeconds) {
     const seconds = countdownSeconds % 60;
     return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
+
+// ===== 状态接口（3011 端口 /status）用 =====
+// 必须与界面同源：是否在上课、当前/下一节课、下一次上下课时刻都复用 getCurrentDaySchedule /
+// getCurrentTime / isClassCurrent / calculateCountdown，避免两套判定各自漂移。
+
+function clockToMinutes(clock) {
+    const [hours, minutes] = clock.split(':').map(Number);
+    return hours * 60 + minutes;
+}
+
+function minutesToClock(minutes) {
+    // 故意不取模：23:59 的下课时刻是次日 00:00，用 24:00 表示比 00:00 更不容易误读
+    const hours = Math.floor(minutes / 60);
+    return `${hours.toString().padStart(2, '0')}:${(minutes % 60).toString().padStart(2, '0')}`;
+}
+
+// 简写与全称都可能是 '名称@下角标' 形式（见 scheduleConfig.js 注释，如 '自@语'、'英语@1'）。
+// 状态接口输出纯文本：去掉 '@' 标记，但保留下角标字符本身，避免两个同名前缀的科目被合并。
+function plainSubjectName(name) {
+    return typeof name === 'string' ? name.replaceAll('@', '') : null;
+}
+
+function getSubjectFullName(shortName) {
+    if (!shortName) return null;
+    // 查表必须用带 '@' 的原始简写作为 key，只有输出才归一
+    const fullName = (scheduleConfig.subject_name || {})[shortName];
+    return plainSubjectName(typeof fullName === 'string' ? fullName : shortName);
+}
+
+// 供 /status 使用：把当前状态压成一份可 JSON 序列化的快照
+function getScheduleStatus() {
+    const now = getCurrentEditedDate();
+    const currentTime = getCurrentTime();
+    const dayOfWeek = getCurrentEditedDay(now);
+    const currentSchedule = getCurrentDaySchedule();
+    const [nowHours, nowMinutes, nowSeconds] = currentTime.split(':').map(Number);
+    const nowTotalSeconds = nowHours * 3600 + nowMinutes * 60 + nowSeconds;
+    const status = {
+        time: currentTime,
+        timestamp: now.getTime(),
+        inClass: false,
+        state: 'break',
+        currentLesson: null,
+        nextLesson: null,
+        nextChange: null
+    };
+
+    const dailyClass = scheduleConfig.daily_class && scheduleConfig.daily_class[dayOfWeek];
+    const dayTimetable = dailyClass && scheduleConfig.timetable && scheduleConfig.timetable[dailyClass.timetable];
+    if (!dayTimetable) return status;
+
+    const lessons = Object.keys(dayTimetable)
+        // 文本时段（课间/晚读/放学…）的 value 是字符串，不是课程序号，不参与状态判定
+        .filter((range) => typeof dayTimetable[range] === 'number' && dayTimetable[range] >= 0)
+        .map((range) => {
+            const [startTime, endTime] = range.split('-');
+            const shortName = currentSchedule[dayTimetable[range]] || null;
+            return {
+                shortName,
+                fullName: getSubjectFullName(shortName),
+                startTime,
+                endTime,
+                startMinutes: clockToMinutes(startTime),
+                // 与 calculateCountdown 保持一致：作息表结束时间 +1 分钟才是真实下课时刻
+                endMinutes: clockToMinutes(endTime) + 1
+            };
+        })
+        .sort((a, b) => a.startMinutes - b.startMinutes);
+
+    const toView = (lesson) => ({
+        fullName: lesson.fullName,
+        shortName: plainSubjectName(lesson.shortName),
+        startAt: minutesToClock(lesson.startMinutes),
+        endAt: minutesToClock(lesson.endMinutes)
+    });
+
+    const currentLesson = lessons.find((lesson) => isClassCurrent(lesson.startTime, lesson.endTime, currentTime));
+    // 严格晚于当前秒的下一节；课间与上课中都取同一份结果
+    const nextLesson = lessons.find((lesson) => lesson.startMinutes * 60 > nowTotalSeconds);
+    if (nextLesson) status.nextLesson = toView(nextLesson);
+
+    if (currentLesson) {
+        status.inClass = true;
+        status.state = 'in_class';
+        status.currentLesson = toView(currentLesson);
+        status.nextChange = {
+            type: 'class_end',
+            at: minutesToClock(currentLesson.endMinutes),
+            inSeconds: calculateCountdown(currentLesson.endTime, currentTime)
+        };
+    } else if (nextLesson) {
+        status.nextChange = {
+            type: 'class_start',
+            at: minutesToClock(nextLesson.startMinutes),
+            inSeconds: nextLesson.startMinutes * 60 - nowTotalSeconds
+        };
+    }
+
+    return status;
+}

@@ -119,5 +119,6 @@ module.exports = {
     plain,
     dateKeyOf,
     createIpcStub,
+    runRepoScript,
     loadRendererScripts,
 }

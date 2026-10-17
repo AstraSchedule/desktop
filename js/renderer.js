@@ -475,6 +475,8 @@ function tick(reset = false) {
     // noinspection JSUnresolvedReference
     lastScheduleData = $.extend(true, {}, scheduleData);
     lastScheduleData.wsConnected = wsConnected; // 保存连接状态用于比较
+    // 状态接口（3011 端口 /status）的唯一数据源：与界面同帧、同一份状态
+    ipcRenderer.send('schedule-status', getScheduleStatus());
 }
 
 // 使用对齐系统秒的调度，避免 20ms 轮询
