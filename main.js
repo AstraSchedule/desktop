@@ -1179,9 +1179,8 @@ app.whenReady().then(() => {
     Menu.setApplicationMenu(null)
     registerCountdownIpc(countdownCtx)
     setupAutoUpdater()
-    statusServer.start().then((port) => {
-        if (port) console.log(`[StatusServer] 状态接口已就绪: http://127.0.0.1:${port}/status`);
-    })
+    // 启动结果只打一条日志；端口被占用时 start() 返回 null，不阻断启动流程
+    void startStatusServer();
     // 先复用上次的版本号，再做网络检查与拉取：否则首包恒为 version=0，边缘缓存全部落空
     restoreVersionTokenFromCache()
     // 先进行网络连接检查，然后获取课表数据
@@ -1217,7 +1216,7 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
     clientConfig.dispose()
-    statusServer.stop()
+    void statusServer.stop()
     stopAeroMonitoring()
     clearCountdownStartupRetryTimer()
     if (countdownState.pollTimer) {
@@ -1704,6 +1703,16 @@ const statusServer = createStatusServer();
 ipcMain.on('schedule-status', (e, status) => {
     statusServer.update(status);
 })
+
+// 状态服务启动结果只用于日志；端口被占用时 start() 返回 null，不影响启动流程
+async function startStatusServer() {
+    try {
+        const port = await statusServer.start();
+        if (port) console.log(`[StatusServer] 状态接口已就绪: http://127.0.0.1:${port}/status`);
+    } catch (error) {
+        console.error('[StatusServer] 启动失败:', error?.message || error);
+    }
+}
 
 ipcMain.on('getTimeOffset', (e, arg) => {
     prompt({

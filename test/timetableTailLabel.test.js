@@ -8,35 +8,11 @@
 
 const test = require('node:test')
 const assert = require('node:assert')
-const fs = require('node:fs')
-const path = require('node:path')
-const vm = require('node:vm')
 
-const {createClock, quietConsole, createStorage, plain} = require('./support/vmEnv')
+const {createScheduleFixture, FIXED_NOW, plain} = require('./support/vmEnv')
 
-const INDEX_JS = path.join(__dirname, '..', 'js', 'index.js')
-// 固定时钟：2026-09-15（星期二），测试不依赖真实系统时间
-const FIXED_NOW = new Date(2026, 8, 15, 8, 0, 0, 0)
-
-function setup(timetable, extraConfig = {}) {
-    const clock = createClock(FIXED_NOW)
-    const context = vm.createContext({
-        localStorage: createStorage(),
-        console: quietConsole(),
-        Date: clock.DateClass
-    })
-    vm.runInContext(fs.readFileSync(INDEX_JS, 'utf8'), context, {filename: 'js/index.js'})
-    const config = {
-        subject_name: {语: '语文', 数: '数学'},
-        daily_class: {
-            [FIXED_NOW.getDay()]: {classList: ['语', '数'], timetable: '常日'}
-        },
-        timetable: {常日: timetable},
-        divider: {常日: []},
-        ...extraConfig
-    }
-    vm.runInContext(`var scheduleConfig = ${JSON.stringify(config)}`, context)
-    return {context, clock}
+function setup(timetable, extraConfig) {
+    return createScheduleFixture(timetable, {extraConfig})
 }
 
 function highlightAt(clock, context, hour, minute = 1) {

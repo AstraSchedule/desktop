@@ -47,12 +47,12 @@ function createStatusServer(options = {}) {
             sendJson(res, 503, {error: 'status_unavailable', message: '课表状态尚未就绪'});
             return;
         }
-        sendJson(res, 200, Object.assign({reportedAt: new Date(receivedAt).toISOString()}, latest));
+        sendJson(res, 200, {reportedAt: new Date(receivedAt).toISOString(), ...latest});
     });
 
     // http.Server 的 error 事件没有监听者会直接抛出并打挂主进程，必须兜住
     server.on('error', (error) => {
-        log.error('[StatusServer] 服务异常:', (error && error.code) || error);
+        log.error('[StatusServer] 服务异常:', error?.code || error);
     });
 
     return {

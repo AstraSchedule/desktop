@@ -8,35 +8,13 @@
 
 const test = require('node:test')
 const assert = require('node:assert')
-const fs = require('node:fs')
-const path = require('node:path')
-const vm = require('node:vm')
 
-const {createClock, quietConsole, createStorage, plain} = require('./support/vmEnv')
+const {createScheduleFixture, FIXED_NOW, plain} = require('./support/vmEnv')
 
-const INDEX_JS = path.join(__dirname, '..', 'js', 'index.js')
-// 固定时钟：2026-09-15（星期二），测试不依赖真实系统时间
-const FIXED_NOW = new Date(2026, 8, 15, 8, 0, 0, 0)
+const SUBJECTS = {语: '语文', 数: '数学', 英: '英语@1'}
 
-function setup(timetable, extraConfig = {}) {
-    const clock = createClock(FIXED_NOW)
-    const context = vm.createContext({
-        localStorage: createStorage(),
-        console: quietConsole(),
-        Date: clock.DateClass
-    })
-    vm.runInContext(fs.readFileSync(INDEX_JS, 'utf8'), context, {filename: 'js/index.js'})
-    const config = {
-        subject_name: {语: '语文', 数: '数学', 英: '英语@1' },
-        daily_class: {
-            [FIXED_NOW.getDay()]: {classList: ['语', '数', '英'], timetable: '常日'}
-        },
-        timetable: {常日: timetable},
-        divider: {常日: []},
-        ...extraConfig
-    }
-    vm.runInContext(`var scheduleConfig = ${JSON.stringify(config)}`, context)
-    return {context, clock}
+function setup(timetable, options = {}) {
+    return createScheduleFixture(timetable, {subjects: SUBJECTS, ...options})
 }
 
 function statusAt(clock, context, hour, minute = 0, second = 0) {
@@ -117,14 +95,8 @@ test('临时调课优先：当天被换掉的科目要体现在状态里', () =>
 })
 
 test('未加载课表（缺当日班级）时不抛错，返回下课中', () => {
-    const clock = createClock(FIXED_NOW)
-    const context = vm.createContext({
-        localStorage: createStorage(),
-        console: quietConsole(),
-        Date: clock.DateClass
-    })
-    vm.runInContext(fs.readFileSync(INDEX_JS, 'utf8'), context, {filename: 'js/index.js'})
-    vm.runInContext('var scheduleConfig = {subject_name: {}, daily_class: {}, timetable: {}, divider: {}}', context)
+    // extraConfig 覆盖掉整份 daily_class/timetable，模拟「课表还没加载到本机」
+    const {context, clock} = setup(DAY, {subjects: {}, extraConfig: {daily_class: {}, timetable: {}}})
 
     const status = statusAt(clock, context, 8, 10)
     assert.strictEqual(status.inClass, false)

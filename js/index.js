@@ -301,7 +301,7 @@ function plainSubjectName(name) {
 function getSubjectFullName(shortName) {
     if (!shortName) return null;
     // 查表必须用带 '@' 的原始简写作为 key，只有输出才归一
-    const fullName = (scheduleConfig.subject_name || {})[shortName];
+    const fullName = scheduleConfig.subject_name?.[shortName];
     return plainSubjectName(typeof fullName === 'string' ? fullName : shortName);
 }
 
@@ -323,8 +323,8 @@ function getScheduleStatus() {
         nextChange: null
     };
 
-    const dailyClass = scheduleConfig.daily_class && scheduleConfig.daily_class[dayOfWeek];
-    const dayTimetable = dailyClass && scheduleConfig.timetable && scheduleConfig.timetable[dailyClass.timetable];
+    const dailyClass = scheduleConfig.daily_class?.[dayOfWeek];
+    const dayTimetable = scheduleConfig.timetable?.[dailyClass?.timetable];
     if (!dayTimetable) return status;
 
     const lessons = Object.keys(dayTimetable)
