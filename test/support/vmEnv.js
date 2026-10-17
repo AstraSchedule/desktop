@@ -110,9 +110,11 @@ function createScheduleFixture(timetable, options = {}) {
         localStorage: createStorage(),
         console: quietConsole(),
         Date: clock.DateClass,
+        // 直接把课表挂成 vm 的全局量，而不是注入 `var scheduleConfig = ...` 赋值语句：
+        // 后者属于动态拼接执行代码（SonarCloud S1523），且这样与真实全局量形态一致
+        scheduleConfig: config,
     })
     runRepoScript(INDEX_JS, 'js/index.js', context)
-    vm.runInContext(`var scheduleConfig = ${JSON.stringify(config)}`, context)
     return {context, clock, config}
 }
 
