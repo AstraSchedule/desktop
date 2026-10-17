@@ -107,6 +107,12 @@ test('渲染进程的状态经 preload 白名单送达主进程', () => {
     assert.strictEqual(status.currentLesson.fullName, '语文')
     assert.strictEqual(status.nextLesson.fullName, '数学')
     assert.deepStrictEqual(status.nextChange, {type: 'class_end', at: '08:40', inSeconds: 1800})
+    assert.deepStrictEqual(
+        status.subjects,
+        [{shortName: '语', fullName: '语文'}, {shortName: '数', fullName: '数学'}],
+        '今天课表上的科目要跟着状态一起送达，否则 /subjects 永远是空清单'
+    )
+    assert.deepStrictEqual(status.catalog.map((item) => item.shortName), ['语', '数', '英'])
 })
 
 test('白名单仍然生效：未登记的 channel 被拦截', () => {

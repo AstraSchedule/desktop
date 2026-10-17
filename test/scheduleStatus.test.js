@@ -45,6 +45,22 @@ test('上课中：报告当前课、下一节课与下课时刻', () => {
     assert.deepStrictEqual(status.nextChange, {type: 'class_end', at: '08:40', inSeconds: 1800})
 })
 
+test('/subjects：今天课表上的科目按课序去重，全部科目另给 catalog', () => {
+    const {context, clock} = setup(DAY)
+    const status = statusAt(clock, context, 8, 10)
+
+    assert.deepStrictEqual(status.subjects, [
+        {shortName: '语', fullName: '语文'},
+        {shortName: '数', fullName: '数学'}
+    ])
+    // '英' 今天没有课，只出现在 catalog 里；'@1' 是下角标标记，输出归一为 '英语1'
+    assert.deepStrictEqual(status.catalog, [
+        {shortName: '语', fullName: '语文'},
+        {shortName: '数', fullName: '数学'},
+        {shortName: '英', fullName: '英语1'}
+    ])
+})
+
 test('课间：不在上课，下一次变动是下一节课开始', () => {
     const {context, clock} = setup(DAY)
     const status = statusAt(clock, context, 8, 45)
@@ -92,6 +108,10 @@ test('临时调课优先：当天被换掉的科目要体现在状态里', () =>
     assert.strictEqual(status.currentLesson.shortName, '英')
     // '英语@1' 的 '@' 是下角标标记，输出纯文本时去标记、留下角标字符
     assert.strictEqual(status.currentLesson.fullName, '英语1')
+    assert.deepStrictEqual(status.subjects, [
+        {shortName: '英', fullName: '英语1'},
+        {shortName: '数', fullName: '数学'}
+    ], '换过的科目要反映在课程清单里，且不重复出现')
 })
 
 test('未加载课表（缺当日班级）时不抛错，返回下课中', () => {
@@ -101,4 +121,6 @@ test('未加载课表（缺当日班级）时不抛错，返回下课中', () =>
     const status = statusAt(clock, context, 8, 10)
     assert.strictEqual(status.inClass, false)
     assert.strictEqual(status.nextLesson, null)
+    assert.deepStrictEqual(status.subjects, [])
+    assert.deepStrictEqual(status.catalog, [], '课表未加载时课程清单为空，不伪造科目')
 })

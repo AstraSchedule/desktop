@@ -43,7 +43,9 @@ const SNAPSHOT = {
     state: 'in_class',
     currentLesson: {fullName: '语文', shortName: '语', startAt: '08:00', endAt: '08:40'},
     nextLesson: {fullName: '数学', shortName: '数', startAt: '08:50', endAt: '09:30'},
-    nextChange: {type: 'class_end', at: '08:40', inSeconds: 1800}
+    nextChange: {type: 'class_end', at: '08:40', inSeconds: 1800},
+    subjects: [{shortName: '语', fullName: '语文'}],
+    catalog: [{shortName: '语', fullName: '语文'}, {shortName: '数', fullName: '数学'}]
 }
 
 test('渲染进程还没推过快照时 /status 返回 503 而不是空 200', async () => {
@@ -52,6 +54,7 @@ test('渲染进程还没推过快照时 /status 返回 503 而不是空 200', as
         const res = await request(port, '/status')
         assert.strictEqual(res.statusCode, 503)
         assert.strictEqual(JSON.parse(res.body).error, 'status_unavailable')
+        assert.strictEqual((await request(port, '/subjects')).statusCode, 503, '/subjects 也要等快照就绪')
     } finally {
         await server.stop()
     }
@@ -74,6 +77,28 @@ test('update 之后的快照原样透传，并附带 reportedAt（忽略 query�
         assert.match(body.reportedAt, /^\d{4}-\d{2}-\d{2}T/)
         assert.strictEqual(res.headers['cache-control'], 'no-store', '状态不可缓存')
         assert.match(res.headers['content-type'], /application\/json/)
+    } finally {
+        await server.stop()
+    }
+})
+
+test('/subjects 单独返回课程清单，且忽略 query', async () => {
+    const {server, port} = await startServer()
+    try {
+        server.update(SNAPSHOT)
+        const res = await request(port, '/subjects?pretty=1')
+        assert.strictEqual(res.statusCode, 200)
+        const body = JSON.parse(res.body)
+        assert.deepStrictEqual(body.subjects, SNAPSHOT.subjects, '今天课表上的科目应透传')
+        assert.deepStrictEqual(body.catalog, SNAPSHOT.catalog, '全部科目应透传')
+        assert.match(body.reportedAt, /^\d{4}-\d{2}-\d{2}T/)
+        assert.strictEqual(res.headers['cache-control'], 'no-store', '课程清单不可缓存')
+
+        // 渲染进程未推送课程字段时给空清单，而不是把 undefined 抛给调用方
+        server.update({state: 'break'})
+        const legacy = JSON.parse((await request(port, '/subjects')).body)
+        assert.deepStrictEqual(legacy.subjects, [])
+        assert.deepStrictEqual(legacy.catalog, [])
     } finally {
         await server.stop()
     }

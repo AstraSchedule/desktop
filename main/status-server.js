@@ -1,4 +1,4 @@
-// 本地状态 HTTP 服务：把渲染进程算出的课表状态对外暴露为只读的 /status。
+// 本地状态 HTTP 服务：把渲染进程算出的课表状态对外暴露为只读的 /status 与 /subjects。
 //
 // 只做「接收快照 + 应答请求」两件事，状态计算全部留在渲染进程——weekIndex / timeOffset /
 // dayOffset / 临时调课只存在渲染进程 localStorage，主进程无法独立算出同一份结果（见 main.js
@@ -38,7 +38,8 @@ function createStatusServer(options = {}) {
             sendJson(res, 405, {error: 'method_not_allowed'});
             return;
         }
-        if ((req.url || '/').split('?')[0] !== '/status') {
+        const path = (req.url || '/').split('?')[0];
+        if (path !== '/status' && path !== '/subjects') {
             sendJson(res, 404, {error: 'not_found'});
             return;
         }
@@ -47,7 +48,13 @@ function createStatusServer(options = {}) {
             sendJson(res, 503, {error: 'status_unavailable', message: '课表状态尚未就绪'});
             return;
         }
-        sendJson(res, 200, {reportedAt: new Date(receivedAt).toISOString(), ...latest});
+        const reportedAt = new Date(receivedAt).toISOString();
+        if (path === '/subjects') {
+            // 课程清单：subjects 是今天课表上的科目，catalog 是配置里的全部科目
+            sendJson(res, 200, {reportedAt, subjects: latest.subjects || [], catalog: latest.catalog || []});
+            return;
+        }
+        sendJson(res, 200, {reportedAt, ...latest});
     });
 
     // http.Server 的 error 事件没有监听者会直接抛出并打挂主进程，必须兜住
@@ -65,8 +72,17 @@ function createStatusServer(options = {}) {
         /** 返回实际监听端口；启动失败（如端口被占用）返回 null，不抛出 */
         start() {
             return new Promise((resolve) => {
-                server.once('listening', () => resolve(server.address().port));
-                server.once('error', () => resolve(null));
+                // 两个事件只会来一个，各自把对方摘掉，避免残留监听器
+                const onListening = () => {
+                    server.off('error', onError);
+                    resolve(server.address().port);
+                };
+                const onError = () => {
+                    server.off('listening', onListening);
+                    resolve(null);
+                };
+                server.once('listening', onListening);
+                server.once('error', onError);
                 server.listen(port, host);
             });
         },

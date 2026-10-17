@@ -277,7 +277,7 @@ function formatCountdown(countdownSeconds) {
     return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
-// ===== 状态接口（3011 端口 /status）用 =====
+// ===== 状态接口（3011 端口 /status、/subjects）用 =====
 // 必须与界面同源：是否在上课、当前/下一节课、下一次上下课时刻都复用 getCurrentDaySchedule /
 // getCurrentTime / isClassCurrent / calculateCountdown，避免两套判定各自漂移。
 
@@ -305,6 +305,14 @@ function getSubjectFullName(shortName) {
     return plainSubjectName(typeof fullName === 'string' ? fullName : shortName);
 }
 
+// 供 /subjects 使用：配置里定义过的全部科目（含今天没有课的科目），按配置里的顺序
+function getSubjectCatalog() {
+    return Object.keys(scheduleConfig.subject_name || {}).map((shortName) => ({
+        shortName: plainSubjectName(shortName),
+        fullName: getSubjectFullName(shortName)
+    }));
+}
+
 // 供 /status 使用：把当前状态压成一份可 JSON 序列化的快照
 function getScheduleStatus() {
     const now = getCurrentEditedDate();
@@ -320,7 +328,11 @@ function getScheduleStatus() {
         state: 'break',
         currentLesson: null,
         nextLesson: null,
-        nextChange: null
+        nextChange: null,
+        // /subjects：今天课表上的科目（下面按课序填充）
+        subjects: [],
+        // /subjects：配置里的全部科目，今天没课也能拿到清单
+        catalog: getSubjectCatalog()
     };
 
     const dailyClass = scheduleConfig.daily_class?.[dayOfWeek];
@@ -344,6 +356,15 @@ function getScheduleStatus() {
             };
         })
         .sort((a, b) => a.startMinutes - b.startMinutes);
+
+    // /subjects：按当天课序去重；临时调课换过的科目，以换后的为准
+    status.subjects = lessons.reduce((list, lesson) => {
+        const shortName = plainSubjectName(lesson.shortName);
+        if (shortName && !list.some((item) => item.shortName === shortName)) {
+            list.push({shortName, fullName: lesson.fullName});
+        }
+        return list;
+    }, []);
 
     const toView = (lesson) => ({
         fullName: lesson.fullName,
