@@ -136,7 +136,7 @@ test('主进程登记了 schedule-status 并把状态交给状态服务', () => 
     assert.match(source, /createStatusServer\(\)/, 'main.js 应创建状态服务实例')
 })
 
-test('主进程只将非 null、非数组的对象交给状态服务', () => {
+test('主进程只将包含必需状态字段的快照交给状态服务', () => {
     const source = fs.readFileSync(MAIN_JS, 'utf8')
     const handler = source.match(/ipcMain\.on\(\s*'schedule-status'\s*,[\s\S]*?\n\}\)/)
     assert.ok(handler, 'main.js 必须登记 ipcMain.on(schedule-status)')
@@ -147,12 +147,29 @@ test('主进程只将非 null、非数组的对象交给状态服务', () => {
         statusServer: {update: (status) => updates.push(status)}
     })
 
-    for (const status of [{}, {state: 'in_class'}]) {
+    const {context} = setup()
+    const snapshot = plain(context.getScheduleStatus())
+    const validSnapshots = [snapshot, {
+        ...snapshot, inClass: false, state: 'break', currentLesson: null,
+        nextLesson: null, nextChange: null, subjects: [], catalog: []
+    }]
+    for (const status of validSnapshots) {
         onStatus({}, status)
         assert.strictEqual(updates.at(-1), status)
     }
-    for (const status of [null, undefined, [], [{state: 'in_class'}], '', 'status', 0, 1, false, true]) {
+    const invalidSnapshots = [
+        {}, {state: 'in_class'}, null, undefined, [], [snapshot], '', 'status', 0, 1, false, true,
+        {...snapshot, time: 81000}, {...snapshot, timestamp: '1789000000000'},
+        {...snapshot, timestamp: NaN}, {...snapshot, timestamp: Infinity},
+        {...snapshot, inClass: 'true'}, {...snapshot, state: null}
+    ]
+    for (const key of ['time', 'timestamp', 'inClass', 'state']) {
+        const incomplete = {...snapshot}
+        delete incomplete[key]
+        invalidSnapshots.push(incomplete)
+    }
+    for (const status of invalidSnapshots) {
         onStatus({}, status)
     }
-    assert.strictEqual(updates.length, 2, '非法状态不得交给状态服务')
+    assert.strictEqual(updates.length, validSnapshots.length, '非法状态不得交给状态服务')
 })

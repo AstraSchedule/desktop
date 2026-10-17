@@ -82,6 +82,23 @@ test('update 之后的快照原样透传，并附带 reportedAt（忽略 query�
     }
 })
 
+test('快照中的 reportedAt 不得覆盖服务端接收时间', async () => {
+    const {server, port} = await startServer()
+    try {
+        const beforeUpdate = Date.now()
+        server.update({...SNAPSHOT, reportedAt: '2000-01-01T00:00:00.000Z'})
+        const afterUpdate = Date.now()
+        const body = JSON.parse((await request(port, '/status')).body)
+        const subjects = JSON.parse((await request(port, '/subjects')).body)
+
+        assert.ok(Date.parse(body.reportedAt) >= beforeUpdate)
+        assert.ok(Date.parse(body.reportedAt) <= afterUpdate)
+        assert.strictEqual(body.reportedAt, subjects.reportedAt)
+    } finally {
+        await server.stop()
+    }
+})
+
 test('/subjects 单独返回课程清单，且忽略 query', async () => {
     const {server, port} = await startServer()
     try {

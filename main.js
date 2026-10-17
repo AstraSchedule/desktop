@@ -1702,6 +1702,8 @@ const statusServer = createStatusServer();
 
 ipcMain.on('schedule-status', (e, status) => {
     if (status === null || typeof status !== 'object' || Array.isArray(status)) return;
+    if (typeof status.time !== 'string' || !Number.isFinite(status.timestamp) ||
+        typeof status.inClass !== 'boolean' || typeof status.state !== 'string') return;
     statusServer.update(status);
 })
 

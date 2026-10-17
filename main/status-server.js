@@ -54,7 +54,7 @@ function createStatusServer(options = {}) {
             sendJson(res, 200, {reportedAt, subjects: latest.subjects || [], catalog: latest.catalog || []});
             return;
         }
-        sendJson(res, 200, {reportedAt, ...latest});
+        sendJson(res, 200, {...latest, reportedAt});
     });
 
     // http.Server 的 error 事件没有监听者会直接抛出并打挂主进程，必须兜住
