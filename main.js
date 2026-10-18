@@ -10,6 +10,7 @@ const Store = require('electron-store');
 const store = new Store();
 const clientConfig = require('./main/clientConfig');
 const {shouldAttemptInstall, recordAttempt, STORE_KEY} = require('./main/updater-guard');
+const {shouldCheckForUpgrade} = require('./main/upgrade-required');
 const {DEFAULT_UPDATE_MIRROR, resolveUpdateSource} = require('./main/update-source');
 const {retryUntilConnected} = require('./main/scheduleRetry');
 const {clientUserAgent} = require('./main/client-ua');
@@ -488,9 +489,9 @@ function connect(rejectUnauthorized = true) {
         }
         clearHeartbeat()
         ws = new WebSocket(url, [], {rejectUnauthorized, headers: {'User-Agent': CLIENT_USER_AGENT}})
-        // 为WebSocket实例添加错误监听器，确保任何错误都不会导致弹窗
-        // 重要：必须在WebSocket实例创建后立即添加错误监听器，以捕获所有错误
-        ws.on('error', (error) => {
+        // 连接失败处理：'error' 与非 101 的升级响应（见下）共用，
+        // 保证两条路径的界面提示与重连退避完全一致
+        const handleWsFailure = (error) => {
             console.error('WebSocket error:', error)
             clearHeartbeat()
             // 通知渲染进程连接已断开
@@ -506,6 +507,19 @@ function connect(rejectUnauthorized = true) {
             // 安全修复：不再降级为“不验证证书”重连（fail-open）。
             // 证书验证失败时按正常策略重连，保持 TLS 证书校验，防止中间人（MITM）攻击
             scheduleReconnect();
+        }
+        // 为WebSocket实例添加错误监听器，确保任何错误都不会导致弹窗
+        // 重要：必须在WebSocket实例创建后立即添加错误监听器，以捕获所有错误
+        ws.on('error', handleWsFailure)
+        // 非 101 的升级响应（如边缘拦截）：ws 只在无人监听时自行按错误处理，
+        // 这里接管以读到状态码——426 表示边缘按 UA 判定客户端过旧，
+        // 与课表请求共用同一个静默更新触发入口（见 main/upgrade-required.js）
+        ws.on('unexpected-response', (_req, res) => {
+            const statusCode = res?.statusCode || 0
+            triggerUpgradeCheck(statusCode)
+            // 接管后 ws 不会自行 abort：terminate() 在 CONNECTING 阶段会 abort 握手并触发
+            // error/close，由上面的 handleWsFailure 统一做界面提示与重连退避
+            ws.terminate()
         })
     } catch (err) {
         console.error('WebSocket create error:', err)
@@ -780,6 +794,30 @@ function setupAutoUpdater() {
         updaterInitialized = true
     } catch (e) {
         console.error('[Updater] setup failed', e)
+    }
+}
+
+// 426 Upgrade Required：服务端/边缘按 UA 判定客户端版本过旧。自动更新开启时
+// 静默检查一次更新；下载与安装沿用 setupAutoUpdater 的既有流程（autoDownload +
+// update-downloaded 里 quitAndInstall），不弹窗。是否值得检查（开关、冷却期）
+// 由 main/upgrade-required.js 判定，便于单测。
+let lastUpgradeCheckAt = 0
+function triggerUpgradeCheck(statusCode) {
+    if (!shouldCheckForUpgrade({
+        statusCode,
+        autoUpdateEnabled: store.get('isAutoUpdate', true),
+        packaged: app.isPackaged,
+        semver: isSemver(app.getVersion()),
+        lastCheckAt: lastUpgradeCheckAt
+    })) return
+    lastUpgradeCheckAt = Date.now()
+    console.log('[Updater] 服务端要求升级（426），静默检查更新')
+    try {
+        setupAutoUpdater()
+        const {autoUpdater} = require('electron-updater')
+        autoUpdater.checkForUpdates().catch((err) => console.error('[Updater] 426 update check failed', err))
+    } catch (e) {
+        console.error('[Updater] 426 update check failed', e)
     }
 }
 
@@ -1072,6 +1110,8 @@ function getScheduleFromCloud({ force = false } = {}) {
         }
 
         if (statusCode < 200 || statusCode >= 300) {
+            // 426 说明版本过旧，重试不会成功：先按设置静默检查更新（见 main/upgrade-required.js）
+            triggerUpgradeCheck(statusCode)
             const edgeBlock = edgeBlockReason(response)
             if (edgeBlock) {
                 console.error(`getScheduleFromCloud blocked by edge node: status=${statusCode}, ${edgeBlock}`)
