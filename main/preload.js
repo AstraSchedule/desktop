@@ -16,6 +16,7 @@ const SEND_CHANNELS = new Set([
     'fromCloud',
     'setClass',
     'update-tray-status',
+    'schedule-status',
 ]);
 
 const INVOKE_CHANNELS = new Set([

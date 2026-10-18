@@ -14,6 +14,8 @@ const {shouldCheckForUpgrade} = require('./main/upgrade-required');
 const {DEFAULT_UPDATE_MIRROR, resolveUpdateSource} = require('./main/update-source');
 const {retryUntilConnected} = require('./main/scheduleRetry');
 const {clientUserAgent} = require('./main/client-ua');
+const {createRevalidateScheduler} = require('./main/scheduleRevalidate');
+const {createStatusServer} = require('./main/status-server');
 
 // 安装器可在安装目录写入一次性初始化文件。仅打包应用读取，避免开发目录中的文件
 // 意外影响开发配置；导入成功后删除文件，后续运行完全依赖 electron-store。
@@ -1217,6 +1219,8 @@ app.whenReady().then(() => {
     Menu.setApplicationMenu(null)
     registerCountdownIpc(countdownCtx)
     setupAutoUpdater()
+    // 启动结果只打一条日志；端口被占用时 start() 返回 null，不阻断启动流程
+    void startStatusServer();
     // 先复用上次的版本号，再做网络检查与拉取：否则首包恒为 version=0，边缘缓存全部落空
     restoreVersionTokenFromCache()
     // 先进行网络连接检查，然后获取课表数据
@@ -1252,6 +1256,7 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
     clientConfig.dispose()
+    void statusServer.stop()
     stopAeroMonitoring()
     clearCountdownStartupRetryTimer()
     if (countdownState.pollTimer) {
@@ -1730,6 +1735,27 @@ ipcMain.on('update-tray-status', (e, arg) => {
 })
 
 
+
+// 本地状态服务（3011 端口 /status）：渲染进程每次 tick 推来课表状态，主进程只负责应答。
+// 状态计算必须留在渲染进程——weekIndex/timeOffset/dayOffset/临时调课都只在那里
+const statusServer = createStatusServer();
+
+ipcMain.on('schedule-status', (e, status) => {
+    if (status === null || typeof status !== 'object' || Array.isArray(status)) return;
+    if (typeof status.time !== 'string' || !Number.isFinite(status.timestamp) ||
+        typeof status.inClass !== 'boolean' || typeof status.state !== 'string') return;
+    statusServer.update(status);
+})
+
+// 状态服务启动结果只用于日志；端口被占用时 start() 返回 null，不影响启动流程
+async function startStatusServer() {
+    try {
+        const port = await statusServer.start();
+        if (port) console.log(`[StatusServer] 状态接口已就绪: http://127.0.0.1:${port}/status`);
+    } catch (error) {
+        console.error('[StatusServer] 启动失败:', error?.message || error);
+    }
+}
 
 ipcMain.on('getTimeOffset', (e, arg) => {
     prompt({

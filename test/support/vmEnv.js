@@ -89,6 +89,35 @@ function runRepoScript(file, filename, context) {
     new vm.Script(source, {filename}).runInContext(context) // NOSONAR
 }
 
+// 固定时钟：2026-09-15（星期二），状态类测试不依赖真实系统时间
+const FIXED_NOW = new Date(2026, 8, 15, 8, 0, 0, 0)
+
+// createScheduleFixture 在 vm 沙箱里只加载 js/index.js（课表状态计算都在这里），
+// 并以 timetable 为基础组装一份最小 scheduleConfig 注入；需要「缺当日班级」「无课表」
+// 这类异常配置时，用 extraConfig 覆盖对应字段。
+function createScheduleFixture(timetable, options = {}) {
+    const now = options.now || FIXED_NOW
+    const subjects = options.subjects || {语: '语文', 数: '数学'}
+    const config = {
+        subject_name: subjects,
+        daily_class: {[now.getDay()]: {classList: Object.keys(subjects), timetable: '常日'}},
+        timetable: {常日: timetable},
+        divider: {常日: []},
+        ...options.extraConfig,
+    }
+    const clock = createClock(now)
+    const context = vm.createContext({
+        localStorage: createStorage(),
+        console: quietConsole(),
+        Date: clock.DateClass,
+        // 直接把课表挂成 vm 的全局量，而不是注入 `var scheduleConfig = ...` 赋值语句：
+        // 后者属于动态拼接执行代码（SonarCloud S1523），且这样与真实全局量形态一致
+        scheduleConfig: config,
+    })
+    runRepoScript(INDEX_JS, 'js/index.js', context)
+    return {context, clock, config}
+}
+
 // loadRendererScripts 在最小 DOM 桩上加载 index.js + renderer.js。
 // 需要真实 DOM 的绘制函数由调用方按需替换；sandbox 用于注入 $ 之类的额外全局量。
 function loadRendererScripts({clock, storage, config, ipc, weekIndex = 1, sandbox = {}}) {
@@ -119,5 +148,8 @@ module.exports = {
     plain,
     dateKeyOf,
     createIpcStub,
+    runRepoScript,
+    FIXED_NOW,
+    createScheduleFixture,
     loadRendererScripts,
 }
