@@ -14,7 +14,6 @@ const {shouldCheckForUpgrade} = require('./main/upgrade-required');
 const {DEFAULT_UPDATE_MIRROR, resolveUpdateSource} = require('./main/update-source');
 const {retryUntilConnected} = require('./main/scheduleRetry');
 const {clientUserAgent} = require('./main/client-ua');
-const {createRevalidateScheduler} = require('./main/scheduleRevalidate');
 const {createStatusServer} = require('./main/status-server');
 
 // 安装器可在安装目录写入一次性初始化文件。仅打包应用读取，避免开发目录中的文件
