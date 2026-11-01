@@ -20,6 +20,14 @@ const MAIN_LINES = MAIN_JS.split(/\r?\n/)
 // 唯一允许强制回源的两处：用户点击的托盘项、304 后缓存读不出时的一次性补齐
 const ALLOWED_FORCE_CONTEXTS = ["label: '更新课表'", "'http-304'"]
 
+// 取 main.js 里以 marker 开头、到块结束的那段源码。
+// 同一份「提取一块代码」的样板在多个断言里复用，抽出来免得新代码重复率超标（Sonar 门槛 3%）。
+function blockAfter(marker) {
+    const start = MAIN_JS.indexOf(marker)
+    assert.notStrictEqual(start, -1, `找不到代码块：${marker}`)
+    return MAIN_JS.slice(start, MAIN_JS.indexOf('\n        }', start))
+}
+
 test('除声明处外没有任何地方把版本令牌归零', () => {
     const offenders = MAIN_LINES.filter((line) => /^\s*currentVersionToken\s*=\s*'0'/.test(line))
     assert.deepStrictEqual(offenders, [], '令牌只允许在声明处初始化，不得在运行期归零')
@@ -49,9 +57,7 @@ test('渲染进程的自动拉取入口不得强制回源', () => {
 })
 
 test('SyncConfig 推送按版本号请求，不强制回源', () => {
-    const start = MAIN_JS.indexOf("if (text === 'SyncConfig')")
-    assert.notStrictEqual(start, -1, '找不到 SyncConfig 分支')
-    const block = MAIN_JS.slice(start, MAIN_JS.indexOf('\n        }', start))
+    const block = blockAfter("if (text === 'SyncConfig')")
     assert.ok(block.includes('getScheduleFromCloud()'), 'SyncConfig 必须触发一次拉取')
     assert.ok(!block.includes('force'), 'SyncConfig 推送不得强制回源')
 })
@@ -62,11 +68,8 @@ test('SyncConfig 推送按版本号请求，不强制回源', () => {
 // 边缘缓存被客户端自己打穿（线上 ESA 访问日志实测：带真实令牌的请求 100% 边缘命中 304，
 // 却紧跟约 53 次/天的 version=0 穿透到源站，其中半数拉起冷启动）。
 test('304 分支以「本班配置已显示」为前置，且判定早于强制回源', () => {
-    const start = MAIN_JS.indexOf('if (statusCode === 304)')
-    assert.notStrictEqual(start, -1, '找不到 304 分支')
-    const block = MAIN_JS.slice(start, MAIN_JS.indexOf('\n        }', start))
     // 锚定真实代码 token，不能用裸函数名：注释里也会提到 loadScheduleFromCache
-    const lines = block.split(/\r?\n/)
+    const lines = blockAfter('if (statusCode === 304)').split(/\r?\n/)
     // 锚定整行条件，不按字符位置切片：条件写在同一行里，切片会把前半截掉
     const guardLine = lines.findIndex((l) => /^\s*if \(!alreadyShown && !loadScheduleFromCache\('http-304'/.test(l))
     const declaredLine = lines.findIndex((l) => /^\s*const alreadyShown = /.test(l))
