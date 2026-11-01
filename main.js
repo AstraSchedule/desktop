@@ -255,6 +255,9 @@ function astraRequest(options) {
 }
 let classId = String(store.get("class", "39/2023/1"))
 let lastScheduleConfig = null
+// 内存里这份配置属于哪个班级（按请求发出时的 classId 快照）。换了班级就不能拿旧班的
+// 配置冒充新班的「已显示」，否则课表 304 会让画面停在别的班级的课表上。
+let lastScheduleConfigClass = null
 // 当前画面配置的来源：'cloud'（云端）/ 'cache'（本地缓存）/ null（还没有可用配置）
 let lastScheduleSource = null
 console.log('Class:', classId, 'Server:', getServer(), 'Secure:', store.get("isSecureConnection", true));
@@ -931,6 +934,8 @@ function loadScheduleFromCache(reason, { markOffline = true } = {}) {
         offlineCache.setOfflineStatus(true)
     }
     lastScheduleConfig = cachedData.data
+    // 缓存里这份配置的班级就是当前 classId（离线回落不会跨班级取缓存）
+    lastScheduleConfigClass = classId
     countdownState.scheduleCountdownRecords = Array.isArray(cachedData.data.countdown_records)
         ? cachedData.data.countdown_records
         : []
@@ -1061,7 +1066,9 @@ function getScheduleFromCloud({ force = false } = {}) {
     const { agreement } = getProtocols()
     // 添加 version 查询参数：force 只影响本次请求，不改写 currentVersionToken（见 main/scheduleVersion.js）
     const requestVersion = resolveRequestVersion(force, currentVersionToken)
-    const url = `${agreement}://${getServer()}/${classId}?version=${encodeURIComponent(requestVersion)}`
+    // 快照本次请求对应的班级：响应到达时 classId 可能已被用户改动，配置归属按发出时算
+    const requestClassId = classId
+    const url = `${agreement}://${getServer()}/${requestClassId}?version=${encodeURIComponent(requestVersion)}`
     console.log('Requesting schedule from cloud:', url);
 
     // 本次请求的序号，响应到达时校验是否仍为最新请求
@@ -1091,7 +1098,14 @@ function getScheduleFromCloud({ force = false } = {}) {
             console.log('Schedule not modified (304), server confirmed the version we hold');
             // 304 表示服务端确认「本地这份就是最新」，此时才把缓存内容显示出来：
             // 仍是先询问服务端、拿到确认，不存在提前显示。
-            if (!loadScheduleFromCache('http-304', { markOffline: false })) {
+            // 这里必须区分两件事：「内存里已有本班的可显示配置」（什么都不用做）与
+            // 「本地拿不到配置」（补拉一次全量）。原先只靠 loadScheduleFromCache 的返回值
+            // 表达，而它遇到内存已有配置会直接返回 false（那是给离线回落写的守卫），
+            // 于是每次日程切换都被判成「缓存读不出」→ 带 version=0 强制回源：
+            // 边缘缓存按版本号命中却被客户端自己打穿（线上实测每天约 53 次无效回源，
+            // 其中半数还要拉起冷启动）。
+            const alreadyShown = !!lastScheduleConfig && lastScheduleConfigClass === classId
+            if (!alreadyShown && !loadScheduleFromCache('http-304', { markOffline: false })) {
                 // 本地缓存不存在或不可读：这个版本令牌指向的配置拿不到，本次必须完整拉一次，
                 // 否则冷启动会既没有课表、也不会补拉。只对这一次请求生效（force 不改写令牌）：
                 // 令牌本身未必失效，持久归零会让后续自动请求全部绕过边缘缓存。
@@ -1167,6 +1181,7 @@ function getScheduleFromCloud({ force = false } = {}) {
 
                 if (win && !win.isDestroyed()) win.webContents.send('newConfig', scheduleConfigSync)
                 lastScheduleConfig = scheduleConfigSync
+                lastScheduleConfigClass = requestClassId
                 lastScheduleSource = 'cloud'
                 // 自动客户端配置：规则与时间基准随课表配置一起下发
                 clientConfig.updateFromSchedule(scheduleConfigSync)
