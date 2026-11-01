@@ -5,6 +5,11 @@ on:
     branches:
       - main
 
+# 默认只读：构建通道不再发布 GitHub release（--publish never），
+# 只有 publish_release 闸门单独提权 contents: write（zizmor overly-broad-permissions）。
+permissions:
+  contents: read
+
 jobs:
   # 版本号只在这里计算一次，经 job output 提供给两个矩阵任务共用。
   # 若各任务各自 Get-Date：跨午夜/月末或失败重跑时两次算出的日期不同，
@@ -311,6 +316,9 @@ jobs:
       - name: Create or update release with all artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 本 job 没有 checkout，runner 无 .git，gh 无法从 remote 推断仓库；
+          # GH_TOKEN 只管认证，仓库上下文必须显式给出（CodeRabbit #1，Major）
+          GH_REPO: ${{ github.repository }}
         run: |
           ver='${{ needs.version.outputs.ver }}'
           tag="v$ver"
@@ -328,5 +336,7 @@ jobs:
             # 失败重跑时 release 可能已存在：--clobber 覆盖上传保持幂等
             gh release upload "$tag" "${files[@]}" --clobber
           else
-            gh release create "$tag" "${files[@]}" --title "$tag" --notes "Rolling build $ver（OSS 镜像已同步）"
+            # --target 锁定触发本次构建的提交：OSS 重试最长 6 小时，期间 main
+            # 若有新提交，缺省会把 tag 打到未构建的代码上（CodeRabbit #2）
+            gh release create "$tag" "${files[@]}" --target "$GITHUB_SHA" --title "$tag" --notes "Rolling build $ver（OSS 镜像已同步）"
           fi
