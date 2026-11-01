@@ -22,19 +22,22 @@ jobs:
           # 语义化版本：YYYYMM.D.N（均为数字且无前导零）
           ym=$(date -u +%Y%m)
           dd=$(date -u +%-d)
-          echo "ver=${ym}.$dd.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "ver=${ym}.${dd}.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
 
+  # 两个通道并行构建并上传 OSS。此前串行（max-parallel: 1）只是为了避免并发
+  # 创建 GitHub release 的竞争；现在 GitHub release 不再由 electron-builder 在
+  # 构建中发布（改为 --publish never，发布统一挪到 publish_release 闸门），
+  # 竞争源头消除，两条构建线放心并行，CI 时间约省一半。
   build_and_publish:
-    name: Build & Publish (${{ matrix.channel }})
+    name: Build & Upload OSS (${{ matrix.channel }})
     needs: version
     if: ${{ !startsWith(github.event.head_commit.message, 'docs') }}
-    permissions:
-      contents: write
     runs-on: windows-latest
+    # OSS 上传失败时无限重试；6 小时是 GHA 单 job 硬上限，作为最终兜底——
+    # 超时则本 job 变红，publish_release 不会执行，宁可不发 Release。
+    timeout-minutes: 360
     strategy:
       fail-fast: false
-      # 两个通道发布到同一个 release（标签 v<version>），串行执行避免并发创建 release 竞争
-      max-parallel: 1
       matrix:
         include:
           # 默认通道：旧版 Electron（最后支持 Win7/8 的 22.x）、ia32，元数据文件 latest.yml
@@ -97,6 +100,8 @@ jobs:
 
           # 分叉构建：两个通道共用同一个 release 与版本号，只靠元数据文件名区分。
           # Win10+ 通道写 win10.yml，默认通道保持 latest.yml。
+          # 即使 GitHub 发布已挪到 publish_release，这段配置仍必须保留：
+          # publish 配置决定 electron-builder 是否生成 latest.yml/win10.yml 元数据及其内容。
           $pub = $pkg.build.publish[0]
           if ('${{ matrix.channel }}' -eq 'win10') {
             $pub | Add-Member -NotePropertyName channel -NotePropertyValue 'win10' -Force
@@ -112,17 +117,12 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      # 两个通道都发布到同一个 GitHub release（标签 v<version>）：默认通道产出 latest.yml，
-      # Win10+ 通道产出 win10.yml，安装包名也已区分，互不覆盖。
-      - name: Build and publish to GitHub Releases
+      # 只构建、只产出元数据，不发布 GitHub release：release 由 publish_release
+      # 闸门在两条 OSS 上传全部成功并通过一致性校验后统一创建，见文件底部。
+      - name: Build installers (GitHub publish deferred to release gate)
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # 两个通道会先后上传到同一个 release：第二个任务/重跑时该 release 可能已存在，
-          # electron-builder 默认拒绝上传超过 2 小时的 release，这里放开（版本号含 run_number，安全）。
-          EP_GH_IGNORE_TIME: "true"
         run: |
-          bun x electron-builder --win --${{ matrix.arch }} --publish always
+          bun x electron-builder --win --${{ matrix.arch }} --publish never
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Copy NSIS installer alias
@@ -137,16 +137,7 @@ jobs:
             exit 1
           }
 
-      - name: Upload installer alias to release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $ver = (Get-Content package.json | ConvertFrom-Json).version
-          gh release upload "v$ver" "dist/${{ matrix.installer_alias }}" --clobber
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Upload dist to OSS
+      - name: Upload dist to OSS (infinite retry)
         shell: pwsh
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY }}
@@ -163,10 +154,23 @@ jobs:
           $yml = Get-ChildItem -Path dist -File | Where-Object { $_.Name -eq $channelFile } | Select-Object -First 1
           if (-not $yml) { Write-Error "$channelFile not found."; exit 1 }
 
+          # OSS 偶发 5xx / 网络抖动不再让整条发布半途而废：无限重试 + 线性退避（单次最长 120s）。
+          # 兜底是 job 的 timeout-minutes（6 小时）：超时任务变红，publish_release 不执行，
+          # 宁可不发 Release，也不发没有 OSS 镜像的 Release。
           function Push-OSS([string]$local, [string]$key) {
-            Write-Host "Uploading $key"
-            aws s3 cp $local "s3://yanmo-objects/$key" --endpoint-url "https://cn-nb1.rains3.com"
-            if ($LASTEXITCODE -ne 0) { Write-Error "Failed to upload $key"; exit $LASTEXITCODE }
+            $attempt = 0
+            while ($true) {
+              $attempt++
+              Write-Host "Uploading $key (attempt $attempt)"
+              aws s3 cp $local "s3://yanmo-objects/$key" --endpoint-url "https://cn-nb1.rains3.com"
+              if ($LASTEXITCODE -eq 0) {
+                Write-Host "Uploaded $key on attempt $attempt"
+                return
+              }
+              $delay = [Math]::Min(120, 10 * $attempt)
+              Write-Warning "上传 $key 失败（exit $LASTEXITCODE），$delay 秒后重试（无限重试，不中断）"
+              Start-Sleep -Seconds $delay
+            }
           }
 
           Write-Host "Uploading version: $ver (channel: ${{ matrix.channel }})"
@@ -277,3 +281,52 @@ jobs:
             if ($LASTEXITCODE -ne 0) { Write-Error "删除 $key 失败"; exit $LASTEXITCODE }
           }
           Write-Host "OSS $env:PREFIX 现在只保留 $ver 的产物"
+
+  # 发布闸门：两个通道都完成「构建 + OSS 无限重试上传」，且 prune_oss_latest 的
+  # 版本一致性校验通过后，才创建 GitHub Release 并上传全部产物（安装包 / 便携版 /
+  # 别名 / 元数据 yml / blockmap）。任何时刻公开的 Release 背后必有完整 OSS 镜像，
+  # 不再出现「发了 Release 却没有 OSS Mirror」的半发布。
+  # 产物文件名与 electron-builder 原生成计划一致，latest.yml/win10.yml 内指向
+  # GitHub release 下载地址的 URL 依然有效。
+  publish_release:
+    name: Publish GitHub Release
+    needs: [version, build_and_publish, prune_oss_latest]
+    if: ${{ !startsWith(github.event.head_commit.message, 'docs') }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download win7 dist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-windows-win7
+          path: dist-win7
+
+      - name: Download win10 dist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-windows-win10
+          path: dist-win10
+
+      - name: Create or update release with all artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ver='${{ needs.version.outputs.ver }}'
+          tag="v$ver"
+          shopt -s nullglob
+          # 只取发布产物（exe/yml/blockmap），win-*-unpacked/ 里的 electron.exe 等中间物不进 release；
+          # 不依赖 upload-artifact 是否保留 dist/ 前缀，递归查找但剪掉 unpacked 目录
+          files=($(find dist-win7 dist-win10 \( -name 'win-*-unpacked' -o -name 'win-unpacked' \) -prune -o -type f \( -name '*.exe' -o -name 'latest.yml' -o -name 'win10.yml' -o -name '*.blockmap' \) -print | sort))
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::没有可发布的产物"
+            exit 1
+          fi
+          echo "Publishing ${#files[@]} artifacts to $tag:"
+          printf '  %s\n' "${files[@]}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            # 失败重跑时 release 可能已存在：--clobber 覆盖上传保持幂等
+            gh release upload "$tag" "${files[@]}" --clobber
+          else
+            gh release create "$tag" "${files[@]}" --title "$tag" --notes "Rolling build $ver（OSS 镜像已同步）"
+          fi
