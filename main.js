@@ -1233,7 +1233,7 @@ app.whenReady().then(() => {
     }
     createWindow()
     setUnfreezeTimes(
-        store.get('unfreezeStartTime', '2026-12-29 00:00:00'),
+        store.get('unfreezeStartTime', '2026-12-01 00:00:00'),
         store.get('unfreezeEndTime', '2026-12-31 13:00:00')
     )
     createUnfreezeWindow(screen)

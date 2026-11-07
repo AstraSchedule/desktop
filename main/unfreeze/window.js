@@ -15,7 +15,7 @@ let unfreezeWin = null;
 
 // 由调试选项设置的解冻时间（持久化在主进程侧，窗口重建/重载后立即补发）
 let unfreezeConfig = {
-    startTime: '2026-12-29 00:00:00',
+    startTime: '2026-12-01 00:00:00',
     endTime: '2026-12-31 13:00:00'
 };
 
