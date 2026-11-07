@@ -24,3 +24,12 @@ test('非法/越界输入被拒绝，不写入 store', () => {
     assert.strictEqual(fromLocalInput('2026-12-29T25:00'), null)
     assert.strictEqual(fromLocalInput(''), null)
 })
+
+// CodeRabbit 存量意见回归：主进程持久化时间校验
+test('parseStoredTime 拒绝不可解析值并回退默认', () => {
+    const {parseStoredTime} = require('../main/unfreeze/time')
+    assert.strictEqual(parseStoredTime('not-a-date', 'FALLBACK'), 'FALLBACK')
+    assert.strictEqual(parseStoredTime('2026-12-01 00:00:00', 'FALLBACK'), '2026-12-01 00:00:00')
+    assert.strictEqual(parseStoredTime(null, 'FALLBACK'), 'FALLBACK')
+    assert.strictEqual(parseStoredTime('2026-13-45 99:99:99', 'FALLBACK'), 'FALLBACK')
+})

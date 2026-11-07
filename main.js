@@ -1540,7 +1540,7 @@ ipcMain.on('getWeekIndex', (e, arg) => {
                                 return
                             }
                             store.set('unfreezeStartTime', stored)
-                            setUnfreezeTimes(stored, times.endTime)
+                            setUnfreezeTimes(stored, getUnfreezeTimes().endTime)
                         })
                     }
                 },
@@ -1564,7 +1564,7 @@ ipcMain.on('getWeekIndex', (e, arg) => {
                                 return
                             }
                             store.set('unfreezeEndTime', stored)
-                            setUnfreezeTimes(times.startTime, stored)
+                            setUnfreezeTimes(getUnfreezeTimes().startTime, stored)
                         })
                     }
                 },

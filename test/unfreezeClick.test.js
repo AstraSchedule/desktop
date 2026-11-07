@@ -74,3 +74,22 @@ test('完成态显示 end 图且隐藏倒计时', () => {
     assert.strictEqual(s.startLayer.style.clipPath, 'inset(100% 0 0 0)')
     assert.strictEqual(s.countdownEl.style.display, 'none')
 })
+
+// CodeRabbit 存量意见回归：坏时间回退、完成态停音频
+test('损坏的下发时间回退到默认值，不产生 NaN 进度', () => {
+    const s = loadWithInit('2026-12-30T12:00:00')
+    applyConfig(s.handlers, 'not-a-date', '2026-12-31 13:00:00')
+    assert.match(s.startLayer.style.clipPath, /^inset\([\d.]+% 0 0 0\)$/, '坏值回退后进度应为有效百分比')
+    assert.match(s.countdownEl.textContent, /%$/, '倒计时进度不应为 NaN')
+    assert.doesNotMatch(s.countdownEl.textContent, /NaN/)
+})
+
+test('改时间到过去时，完成态会停止正在播放的音频', () => {
+    const s = loadWithInit('2026-12-30T12:00:00')
+    applyConfig(s.handlers, '2026-12-29 00:00:00', '2026-12-31 13:00:00')
+    s.container.click() // 先开始播放
+    assert.strictEqual(s.audio.played, true)
+    applyConfig(s.handlers, '2026-12-29 00:00:00', '2026-12-29 01:00:00') // 结束时间改到过去
+    assert.strictEqual(s.audio.paused, true, '进入完成态应暂停音频')
+    assert.strictEqual(s.countdownEl.style.display, 'none')
+})

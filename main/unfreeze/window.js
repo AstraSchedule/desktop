@@ -1,5 +1,6 @@
 const path = require('node:path');
 const { BrowserWindow, ipcMain, shell } = require('electron');
+const { parseStoredTime } = require('./time');
 
 // 解冻完成（100%）后点击跳转的视频链接：固定在主进程，不接受渲染进程传参，
 // 避免 sandbox 窗口把任意 URL/协议带进 shell.openExternal
@@ -12,12 +13,14 @@ ipcMain.on('unfreeze-open-video', () => {
 });
 
 let unfreezeWin = null;
+let lastClassStatus = null;
 
 // 由调试选项设置的解冻时间（持久化在主进程侧，窗口重建/重载后立即补发）
-let unfreezeConfig = {
+const DEFAULT_UNFREEZE_CONFIG = {
     startTime: '2026-12-01 00:00:00',
     endTime: '2026-12-31 13:00:00'
 };
+let unfreezeConfig = { ...DEFAULT_UNFREEZE_CONFIG };
 
 // 创建刘德华解冻动画窗口（右下角置底，默认隐藏）
 function createUnfreezeWindow(screen) {
@@ -51,6 +54,10 @@ function createUnfreezeWindow(screen) {
     unfreezeWin.loadFile(path.join(__dirname, '..', '..', 'unfreeze.html'));
     unfreezeWin.webContents.once('did-finish-load', () => {
         unfreezeWin.webContents.send('unfreeze-config', unfreezeConfig);
+        // 课程状态未必会再变化，补发一次缓存值，保证页面能拿到当前状态
+        if (lastClassStatus) {
+            unfreezeWin.webContents.send('class-status-changed', lastClassStatus);
+        }
     });
     unfreezeWin.on('closed', () => {
         unfreezeWin = null;
@@ -75,16 +82,20 @@ function destroyUnfreezeWindow() {
     unfreezeWin = null;
 }
 
-// 主进程收到课程状态后转发给解冻窗口
+// 主进程收到课程状态后转发给解冻窗口，并缓存最新值供页面加载后补发
 function forwardClassStatus(arg) {
+    lastClassStatus = arg;
     if (unfreezeWin && !unfreezeWin.isDestroyed()) {
         unfreezeWin.webContents.send('class-status-changed', arg);
     }
 }
 
-// 调试选项设置时间：保存并立即下发给已存在的解冻窗口
+// 调试选项设置时间：校验持久化值后保存并立即下发给已存在的解冻窗口
 function setUnfreezeTimes(startTime, endTime) {
-    unfreezeConfig = {startTime, endTime};
+    unfreezeConfig = {
+        startTime: parseStoredTime(startTime, DEFAULT_UNFREEZE_CONFIG.startTime),
+        endTime: parseStoredTime(endTime, DEFAULT_UNFREEZE_CONFIG.endTime)
+    };
     if (unfreezeWin && !unfreezeWin.isDestroyed()) {
         unfreezeWin.webContents.send('unfreeze-config', unfreezeConfig);
     }

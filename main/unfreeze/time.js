@@ -25,4 +25,12 @@ function fromLocalInput(input) {
     return m[1] + '-' + m[2] + '-' + m[3] + ' ' + m[4] + ':' + m[5] + ':00';
 }
 
-module.exports = { toLocalInput, fromLocalInput };
+
+// 只接受能解析成有效本地时间的字符串，避免坏值下发后渲染层倒计时出现 NaN
+function parseStoredTime(value, fallback) {
+    const text = String(value || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text)) return fallback;
+    const ms = new Date(text.replace(' ', 'T')).getTime();
+    return Number.isNaN(ms) ? fallback : text;
+}
+module.exports = { toLocalInput, fromLocalInput, parseStoredTime };

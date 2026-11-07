@@ -31,12 +31,15 @@ function parseTime(timeString) {
     return new Date(timeString).getTime();
 }
 
+// 下发的持久化时间若损坏（旧配置/手工改坏），回退到默认值，避免 NaN 进度与倒计时
+function normalizeTime(value, fallback) {
+    const ms = parseTime(value);
+    return Number.isNaN(ms) ? fallback : value;
+}
+
 // 正在上课（且不是元旦相关课程）时禁止点击播放
 function shouldDisableClick() {
-    if (classStatus.type === 'current' && classStatus.fullName && !classStatus.fullName.includes('元旦')) {
-        return true;
-    }
-    return false;
+    return classStatus.type === 'current' && classStatus.fullName && !classStatus.fullName.includes('元旦');
 }
 
 function pauseAudio() {
@@ -203,9 +206,9 @@ function init() {
 
 // 监听调试选项下发的时间配置：重置状态并按新时间窗重算
 ipcRenderer.on('unfreeze-config', (e, config) => {
-    if (!config || !config.startTime || !config.endTime) return;
-    UNFREEZE_START_TIME = config.startTime;
-    UNFREEZE_END_TIME = config.endTime;
+    if (!config?.startTime || !config?.endTime) return;
+    UNFREEZE_START_TIME = normalizeTime(config.startTime, DEFAULT_UNFREEZE_START_TIME);
+    UNFREEZE_END_TIME = normalizeTime(config.endTime, DEFAULT_UNFREEZE_END_TIME);
     hasUnfreezeCompleted = false;
     if (animationFrame) cancelAnimationFrame(animationFrame);
     const countdownEl = document.getElementById('countdown');
@@ -213,7 +216,7 @@ ipcRenderer.on('unfreeze-config', (e, config) => {
     const progress = getUnfreezeProgress();
     if (progress >= 1) {
         hasUnfreezeCompleted = true;
-        if (countdownEl) countdownEl.style.display = 'none';
+        onUnfreezeComplete();
         startLayer.style.clipPath = 'inset(100% 0 0 0)';
     } else {
         startLayer.style.clipPath = 'inset(0% 0 0 0)';
