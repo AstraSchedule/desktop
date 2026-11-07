@@ -15,6 +15,7 @@ const {DEFAULT_UPDATE_MIRROR, resolveUpdateSource} = require('./main/update-sour
 const {retryUntilConnected} = require('./main/scheduleRetry');
 const {clientUserAgent} = require('./main/client-ua');
 const {createStatusServer} = require('./main/status-server');
+const { createUnfreezeWindow, toggleUnfreezeWindow, destroyUnfreezeWindow, forwardClassStatus } = require('./main/unfreeze/window');
 
 // 安装器可在安装目录写入一次性初始化文件。仅打包应用读取，避免开发目录中的文件
 // 意外影响开发配置；导入成功后删除文件，后续运行完全依赖 electron-store。
@@ -1230,6 +1231,10 @@ app.whenReady().then(() => {
         return;
     }
     createWindow()
+    createUnfreezeWindow(screen)
+    if (store.get('isUnfreezeEnabled', false)) {
+        setTimeout(() => toggleUnfreezeWindow(true), 1000)
+    }
     Menu.setApplicationMenu(null)
     registerCountdownIpc(countdownCtx)
     setupAutoUpdater()
@@ -1269,6 +1274,7 @@ app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
+    destroyUnfreezeWindow()
     clientConfig.dispose()
     void statusServer.stop()
     stopAeroMonitoring()
@@ -1554,6 +1560,15 @@ ipcMain.on('getWeekIndex', (e, arg) => {
             }
         },
         {
+            label: '解冻动画',
+            type: 'checkbox',
+            checked: store.get('isUnfreezeEnabled', false),
+            click: (e) => {
+                store.set('isUnfreezeEnabled', e.checked)
+                toggleUnfreezeWindow(e.checked)
+            }
+        },
+        {
             label: '开机启动',
             type: 'checkbox',
             checked: store.get('isAutoLaunch', true),
@@ -1710,6 +1725,11 @@ function requestWeatherWithRetry() {
     })
     request.end()
 }
+
+// 转发课程状态变化到元旦解冻窗口（上课时暂停《恭喜发财》）
+ipcMain.on('class-status-changed', (e, arg) => {
+    forwardClassStatus(arg)
+})
 
 ipcMain.on('getWeather', () => {
     // 仅由触发方决定何时拉取；这里统一执行“最多 5 次”的静默重试策略
