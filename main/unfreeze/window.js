@@ -1,5 +1,15 @@
 const path = require('node:path');
-const { BrowserWindow } = require('electron');
+const { BrowserWindow, ipcMain, shell } = require('electron');
+
+// 解冻完成（100%）后点击跳转的视频链接：固定在主进程，不接受渲染进程传参，
+// 避免 sandbox 窗口把任意 URL/协议带进 shell.openExternal
+const UNFREEZE_VIDEO_URL = 'https://www.bilibili.com/video/BV1ad4y1V7wb';
+
+ipcMain.on('unfreeze-open-video', () => {
+    shell.openExternal(UNFREEZE_VIDEO_URL).catch((err) => {
+        console.warn('[Unfreeze] Failed to open video link:', err?.message || err)
+    })
+});
 
 let unfreezeWin = null;
 

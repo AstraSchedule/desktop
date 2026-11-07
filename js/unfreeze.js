@@ -142,10 +142,6 @@ function initAudio() {
 }
 
 function toggleAudio() {
-    if (shouldDisableClick()) {
-        console.log('[Unfreeze] Click disabled due to class status');
-        return;
-    }
     if (!audio) return;
     if (isPlaying) {
         audio.pause();
@@ -156,6 +152,21 @@ function toggleAudio() {
         isPlaying = true;
         console.log('[Unfreeze] Audio played');
     }
+}
+
+// 点击行为：解冻完成（100%）后打开视频链接，之前仍是播放/暂停《恭喜发财》。
+// URL 固定在主进程，这里只发一个不带参数的 channel，避免渲染进程夹带任意地址。
+function handleContainerClick() {
+    if (shouldDisableClick()) {
+        console.log('[Unfreeze] Click disabled due to class status');
+        return;
+    }
+    if (getUnfreezeProgress() >= 1) {
+        console.log('[Unfreeze] Unfreeze complete, opening video link');
+        ipcRenderer.send('unfreeze-open-video');
+        return;
+    }
+    toggleAudio();
 }
 
 function init() {
@@ -169,7 +180,7 @@ function init() {
 
     const container = document.querySelector('.container');
     if (container) {
-        container.addEventListener('click', toggleAudio);
+        container.addEventListener('click', handleContainerClick);
         container.style.cursor = 'pointer';
     }
 
