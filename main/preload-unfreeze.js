@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 const ON_CHANNELS = new Set([
     'class-status-changed',
+    'unfreeze-config',
 ]);
 
 contextBridge.exposeInMainWorld('astraIPC', {

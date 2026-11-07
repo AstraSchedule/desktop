@@ -15,7 +15,8 @@ const {DEFAULT_UPDATE_MIRROR, resolveUpdateSource} = require('./main/update-sour
 const {retryUntilConnected} = require('./main/scheduleRetry');
 const {clientUserAgent} = require('./main/client-ua');
 const {createStatusServer} = require('./main/status-server');
-const { createUnfreezeWindow, toggleUnfreezeWindow, destroyUnfreezeWindow, forwardClassStatus } = require('./main/unfreeze/window');
+const { createUnfreezeWindow, toggleUnfreezeWindow, destroyUnfreezeWindow, forwardClassStatus, setUnfreezeTimes, getUnfreezeTimes } = require('./main/unfreeze/window');
+const { toLocalInput, fromLocalInput } = require('./main/unfreeze/time');
 
 // 安装器可在安装目录写入一次性初始化文件。仅打包应用读取，避免开发目录中的文件
 // 意外影响开发配置；导入成功后删除文件，后续运行完全依赖 electron-store。
@@ -1231,6 +1232,10 @@ app.whenReady().then(() => {
         return;
     }
     createWindow()
+    setUnfreezeTimes(
+        store.get('unfreezeStartTime', '2026-12-29 00:00:00'),
+        store.get('unfreezeEndTime', '2026-12-31 13:00:00')
+    )
     createUnfreezeWindow(screen)
     if (store.get('isUnfreezeEnabled', false)) {
         setTimeout(() => toggleUnfreezeWindow(true), 1000)
@@ -1503,6 +1508,66 @@ ipcMain.on('getWeekIndex', (e, arg) => {
                         }
                     }
                 },
+                {
+                    type: 'separator'
+                },
+                {
+                    label: '解冻动画',
+                    type: 'checkbox',
+                    checked: store.get('isUnfreezeEnabled', false),
+                    click: (e) => {
+                        store.set('isUnfreezeEnabled', e.checked)
+                        toggleUnfreezeWindow(e.checked)
+                    }
+                },
+                {
+                    label: '开始解冻',
+                    click: () => {
+                        const times = getUnfreezeTimes()
+                        prompt({
+                            title: '开始解冻',
+                            label: '请选择解冻开始时间（精确到分）：',
+                            value: toLocalInput(times.startTime),
+                            inputAttrs: { type: 'datetime-local' },
+                            type: 'input',
+                            height: 180,
+                            width: 420,
+                        }).then((r) => {
+                            if (r === null) return
+                            const stored = fromLocalInput(r)
+                            if (!stored) {
+                                dialog.showErrorBox('开始解冻', '请输入有效的日期时间')
+                                return
+                            }
+                            store.set('unfreezeStartTime', stored)
+                            setUnfreezeTimes(stored, times.endTime)
+                        })
+                    }
+                },
+                {
+                    label: '解冻完成',
+                    click: () => {
+                        const times = getUnfreezeTimes()
+                        prompt({
+                            title: '解冻完成',
+                            label: '请选择解冻结束时间（精确到分）：',
+                            value: toLocalInput(times.endTime),
+                            inputAttrs: { type: 'datetime-local' },
+                            type: 'input',
+                            height: 180,
+                            width: 420,
+                        }).then((r) => {
+                            if (r === null) return
+                            const stored = fromLocalInput(r)
+                            if (!stored) {
+                                dialog.showErrorBox('解冻完成', '请输入有效的日期时间')
+                                return
+                            }
+                            store.set('unfreezeEndTime', stored)
+                            setUnfreezeTimes(times.startTime, stored)
+                        })
+                    }
+                },
             ]
         },
         {
@@ -1557,15 +1622,6 @@ ipcMain.on('getWeekIndex', (e, arg) => {
             click: (e) => {
                 store.set('isDuringClassHidden', e.checked)
                 clientConfig.recompute(true)
-            }
-        },
-        {
-            label: '解冻动画',
-            type: 'checkbox',
-            checked: store.get('isUnfreezeEnabled', false),
-            click: (e) => {
-                store.set('isUnfreezeEnabled', e.checked)
-                toggleUnfreezeWindow(e.checked)
             }
         },
         {

@@ -2,9 +2,11 @@
 // 通过 preload 暴露的 window.astraIPC 接收课程状态，不直接 require('electron')
 const ipcRenderer = window.astraIPC;
 
-// 时间配置（js/unfreeze.js 不进 asar，可直接修改这两个时间）
-let UNFREEZE_START_TIME = '2026-12-29 00:00:00';
-let UNFREEZE_END_TIME = '2026-12-31 13:00:00';
+// 默认时间窗；调试选项（托盘）设置后会通过 IPC 覆盖，并持久化在 electron-store
+const DEFAULT_UNFREEZE_START_TIME = '2026-12-29 00:00:00';
+const DEFAULT_UNFREEZE_END_TIME = '2026-12-31 13:00:00';
+let UNFREEZE_START_TIME = DEFAULT_UNFREEZE_START_TIME;
+let UNFREEZE_END_TIME = DEFAULT_UNFREEZE_END_TIME;
 
 // 音量配置
 const VOLUME_MIN = 0;    // 最小音量（0%）
@@ -187,5 +189,26 @@ function init() {
     console.log('[Unfreeze] Start time:', UNFREEZE_START_TIME);
     console.log('[Unfreeze] End time:', UNFREEZE_END_TIME);
 }
+
+// 监听调试选项下发的时间配置：重置状态并按新时间窗重算
+ipcRenderer.on('unfreeze-config', (e, config) => {
+    if (!config || !config.startTime || !config.endTime) return;
+    UNFREEZE_START_TIME = config.startTime;
+    UNFREEZE_END_TIME = config.endTime;
+    hasUnfreezeCompleted = false;
+    if (animationFrame) cancelAnimationFrame(animationFrame);
+    const countdownEl = document.getElementById('countdown');
+    if (countdownEl) countdownEl.style.display = '';
+    const progress = getUnfreezeProgress();
+    if (progress >= 1) {
+        hasUnfreezeCompleted = true;
+        if (countdownEl) countdownEl.style.display = 'none';
+        startLayer.style.clipPath = 'inset(100% 0 0 0)';
+    } else {
+        startLayer.style.clipPath = 'inset(0% 0 0 0)';
+        updateAnimation();
+    }
+    console.log('[Unfreeze] Config applied:', UNFREEZE_START_TIME, '->', UNFREEZE_END_TIME);
+});
 
 globalThis.addEventListener('DOMContentLoaded', init);

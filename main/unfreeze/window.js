@@ -3,6 +3,12 @@ const { BrowserWindow } = require('electron');
 
 let unfreezeWin = null;
 
+// 由调试选项设置的解冻时间（持久化在主进程侧，窗口重建/重载后立即补发）
+let unfreezeConfig = {
+    startTime: '2026-12-29 00:00:00',
+    endTime: '2026-12-31 13:00:00'
+};
+
 // 创建刘德华解冻动画窗口（右下角置底，默认隐藏）
 function createUnfreezeWindow(screen) {
     if (unfreezeWin && !unfreezeWin.isDestroyed()) return unfreezeWin;
@@ -33,6 +39,9 @@ function createUnfreezeWindow(screen) {
     unfreezeWin.setAlwaysOnTop(false, 'desktop');
     // noinspection JSIgnoredPromiseFromCall
     unfreezeWin.loadFile(path.join(__dirname, '..', '..', 'unfreeze.html'));
+    unfreezeWin.webContents.once('did-finish-load', () => {
+        unfreezeWin.webContents.send('unfreeze-config', unfreezeConfig);
+    });
     unfreezeWin.on('closed', () => {
         unfreezeWin = null;
     });
@@ -63,4 +72,16 @@ function forwardClassStatus(arg) {
     }
 }
 
-module.exports = { createUnfreezeWindow, toggleUnfreezeWindow, destroyUnfreezeWindow, forwardClassStatus };
+// 调试选项设置时间：保存并立即下发给已存在的解冻窗口
+function setUnfreezeTimes(startTime, endTime) {
+    unfreezeConfig = {startTime, endTime};
+    if (unfreezeWin && !unfreezeWin.isDestroyed()) {
+        unfreezeWin.webContents.send('unfreeze-config', unfreezeConfig);
+    }
+}
+
+function getUnfreezeTimes() {
+    return unfreezeConfig;
+}
+
+module.exports = { createUnfreezeWindow, toggleUnfreezeWindow, destroyUnfreezeWindow, forwardClassStatus, setUnfreezeTimes, getUnfreezeTimes };
