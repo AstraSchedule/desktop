@@ -17,6 +17,7 @@ const SEND_CHANNELS = new Set([
     'setClass',
     'update-tray-status',
     'schedule-status',
+    'class-status-changed',
 ]);
 
 const INVOKE_CHANNELS = new Set([

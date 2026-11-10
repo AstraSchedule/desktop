@@ -457,6 +457,11 @@ function tick(reset = false) {
         setSidebar()
         hasRenderedSchedule = true
         setBackgroundDisplay()
+        // 同步课程状态给元旦解冻彩蛋窗口（上课时自动暂停播放）
+        ipcRenderer.send('class-status-changed', {
+            type: scheduleData.currentHighlight.type,
+            fullName: scheduleData.currentHighlight.fullName
+        })
         // 天气与课表配置的触发条件不同，不能合并判断：天气不参与任何反馈回路，
         // 重绘时也要刷新。启动时云端配置往往早于第一次周期 tick 到达，天气请求正是搭在
         // 这条重绘路径上，若只由时间驱动的日程变化触发，客户端会一直停在空白占位
