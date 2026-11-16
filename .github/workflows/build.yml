@@ -4,6 +4,15 @@ on:
   push:
     branches:
       - main
+  # 支持在 Actions 页面手动触发一次完整构建与发布（push 事件偶发不投递时的兜底）。
+  # 手动触发没有 head_commit，startsWith(head_commit.message,'docs') 对空值求值为 false；
+  # 构建和发布仍仅限 main 分支。
+  workflow_dispatch:
+
+concurrency:
+  group: rolling-build-and-publish
+  cancel-in-progress: false
+  queue: max
 
 # 默认只读：构建通道不再发布 GitHub release（--publish never），
 # 只有 publish_release 闸门单独提权 contents: write（zizmor overly-broad-permissions）。
@@ -36,7 +45,7 @@ jobs:
   build_and_publish:
     name: Build & Upload OSS (${{ matrix.channel }})
     needs: version
-    if: ${{ !startsWith(github.event.head_commit.message, 'docs') }}
+    if: ${{ github.ref == 'refs/heads/main' && !startsWith(github.event.head_commit.message, 'docs') }}
     runs-on: windows-latest
     # OSS 上传失败时无限重试；6 小时是 GHA 单 job 硬上限，作为最终兜底——
     # 超时则本 job 变红，publish_release 不会执行，宁可不发 Release。
@@ -225,7 +234,7 @@ jobs:
   prune_oss_latest:
     name: Verify & prune OSS latest/
     needs: [version, build_and_publish]
-    if: ${{ !startsWith(github.event.head_commit.message, 'docs') }}
+    if: ${{ github.ref == 'refs/heads/main' && !startsWith(github.event.head_commit.message, 'docs') }}
     runs-on: windows-latest
     env:
       AWS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY }}
@@ -296,7 +305,7 @@ jobs:
   publish_release:
     name: Publish GitHub Release
     needs: [version, build_and_publish, prune_oss_latest]
-    if: ${{ !startsWith(github.event.head_commit.message, 'docs') }}
+    if: ${{ github.ref == 'refs/heads/main' && !startsWith(github.event.head_commit.message, 'docs') }}
     permissions:
       contents: write
     runs-on: ubuntu-latest
