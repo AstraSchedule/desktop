@@ -53,6 +53,9 @@ function ensureCountdownWindow(ctx) {
             nodeIntegration: false,
             contextIsolation: true,
             sandbox: true,
+            // 被全屏置顶窗口（如希沃白板绘画层）遮挡时，Chromium 的 Windows 原生遮挡追踪
+            // 会把本窗口标记为 hidden 并节流定时器与动画，导致倒计时停止刷新。
+            backgroundThrottling: false,
         },
     });
 
