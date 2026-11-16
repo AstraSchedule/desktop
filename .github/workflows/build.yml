@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - main
+  # 支持在 Actions 页面手动触发一次完整构建与发布（push 事件偶发不投递时的兜底）。
+  # 手动触发没有 head_commit，下面各 job 的 startsWith(head_commit.message,'docs') 判据
+  # 对空值求值为 false，因此会正常执行构建。
+  workflow_dispatch:
 
 # 默认只读：构建通道不再发布 GitHub release（--publish never），
 # 只有 publish_release 闸门单独提权 contents: write（zizmor overly-broad-permissions）。
