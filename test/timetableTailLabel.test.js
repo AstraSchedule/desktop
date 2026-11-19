@@ -59,3 +59,28 @@ test('当前时段没有标签时回退到 end_of_day_label', () => {
 
     assert.strictEqual(highlightAt(clock, context, 10).fullName, '放学啦')
 })
+
+// 只有课程时段、最后一段其后再无文本时段时，下课后的时刻匹配不到任何时段，
+// 不会走 findUpcoming 的放学分支；必须靠末尾兜底置 isEnd，否则结束横幅与明日预览失效。
+test('作息表以课程结尾时，下课后仍进入放学状态', () => {
+    const {context, clock} = setup(
+        {'08:00-08:39': 0, '08:50-09:29': 1},
+        {end_of_day_label: '放学啦'}
+    )
+
+    const after = highlightAt(clock, context, 10)
+    assert.strictEqual(after.isEnd, true)
+    assert.strictEqual(after.fullName, '放学啦')
+    assert.strictEqual(after.index, 1, '高亮落在最后一节课上，其余行按已结束灰字渲染')
+})
+
+test('作息表以课程结尾时，课内与课间都不算放学', () => {
+    const {context, clock} = setup({'08:00-08:39': 0, '08:50-09:29': 1})
+
+    const inClass = highlightAt(clock, context, 9)
+    assert.ok(!inClass.isEnd, '课间还没到最后一节课结束，不能提前进入放学')
+
+    const lastLesson = highlightAt(clock, context, 9, 20)
+    assert.strictEqual(lastLesson.fullName, '数学')
+    assert.ok(!lastLesson.isEnd)
+})

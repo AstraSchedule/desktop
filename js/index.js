@@ -276,6 +276,28 @@ function getScheduleData(preview) {
         return {scheduleArray, currentHighlight: {index: null, type: null, fullName: null, countdown: null, countdownText: null}, timetable, divider, nextScheduleName, previewDate: preview.date};
     }
 
+    // 兜底放学判定：作息表最后一段是课、其后再没有文本时段时（如只有
+    // {'08:00-09:29': 1} 这类纯课程表），下课之后的时刻匹配不到任何时段，
+    // 上面的循环既不会置当前课、也不会走 findUpcoming 的 isEnd 分支，
+    // isEnd 会一直不置位，导致结束横幅与明日预览全部失效。
+    if (currentHighlight.index === null && !currentHighlight.isEnd) {
+        let lastClassEnd = null;
+        for (const timeRange of timeRanges) {
+            if (typeof dayTimetable[timeRange] === 'number') lastClassEnd = timeRange.split('-')[1];
+        }
+        if (lastClassEnd && clockToMinutes(currentTime) > clockToMinutes(lastClassEnd)) {
+            setCurrentHighlightExternal(
+                currentHighlight,
+                Math.max(0, scheduleArray.length - 1),
+                'upcoming',
+                scheduleConfig['end_of_day_label'] || '放学',
+                lastClassEnd,
+                currentTime,
+                true
+            );
+        }
+    }
+
     // 如果没有找到当前课程或课间，尝试设置下一节课的名称
     if (currentHighlight.index === null && nextScheduleName === null) {
         // 查找第一节课作为下一节课
