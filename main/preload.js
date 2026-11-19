@@ -49,6 +49,7 @@ const ON_CHANNELS = new Set([
     'ClassCountdown',
     'ClassHidden',
     'AlwaysMinimized',
+    'EndBanner',
     'setDayOffset',
     'getDayOffset',
     'setWeather',

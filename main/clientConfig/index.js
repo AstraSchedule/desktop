@@ -6,13 +6,17 @@
 const conditions = require('./conditions')
 
 const SETTING_KEYS = ['isWindowAlwaysOnTop', 'isDuringClassHidden', 'isAlwaysMinimized', 'isDuringClassCountdown']
+// 字符串类设置项：与布尔开关共用同一套「优先级 + 作用域具体度」选优，
+// 但取值是文案而不是 true/false（结束横幅按条件换文案就靠它）
+const TEXT_SETTING_KEYS = ['end_banner_text']
 
 // 无规则生效时使用的兜底值（与托盘菜单里的默认值保持一致）
 const DEFAULT_SETTINGS = {
     isWindowAlwaysOnTop: true,
     isDuringClassHidden: true,
     isAlwaysMinimized: false,
-    isDuringClassCountdown: true
+    isDuringClassCountdown: true,
+    end_banner_text: ''
 }
 
 const TICK_MS = 20000
@@ -46,18 +50,26 @@ function updateFromSchedule(config) {
     recompute(true)
 }
 
+// 「没课」作息表名由管理端默认模板定义，与渲染进程的 NO_CLASS_TIMETABLE 保持一致
+const NO_CLASS_TIMETABLE = '没课'
+
 function buildContext(now) {
     const config = scheduleConfig || {}
     const daily = Array.isArray(config.daily_class) ? config.daily_class[now.getDay()] : null
     const timetableName = daily?.timetable
     const table = timetableName ? config.timetable?.[timetableName] : null
     const periods = conditions.periodRanges(table)
+    // 「明天没课」条件要用到明天的课表：服务端下发的 daily_class 恒为 7 项且按 getDay() 排布
+    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+    const tomorrowDaily = Array.isArray(config.daily_class) ? config.daily_class[tomorrow.getDay()] : null
+    const tomorrowHasClass = !!tomorrowDaily && tomorrowDaily.timetable !== NO_CLASS_TIMETABLE
     return {
         now,
         termStart: String(config.term_start || ''),
         appStart,
         periods,
-        periodOrder: conditions.sortedPeriodStarts(periods)
+        periodOrder: conditions.sortedPeriodStarts(periods),
+        tomorrowHasClass
     }
 }
 
@@ -87,6 +99,11 @@ function mergeRuleSettings(winners, rule, ctx) {
         const candidate = { value: settings[key], priority, specificity }
         if (isBetterCandidate(candidate, winners[key])) winners[key] = candidate
     }
+    for (const key of TEXT_SETTING_KEYS) {
+        if (typeof settings[key] !== 'string') continue
+        const candidate = { value: settings[key], priority, specificity }
+        if (isBetterCandidate(candidate, winners[key])) winners[key] = candidate
+    }
 }
 
 // 每个配置项各自选出胜出规则
@@ -100,7 +117,7 @@ function recompute(force) {
     if (!deps) return
     const ctx = buildContext(new Date())
     const winners = resolveSettings(ctx)
-    for (const key of SETTING_KEYS) {
+    for (const key of [...SETTING_KEYS, ...TEXT_SETTING_KEYS]) {
         const winner = winners[key]
         const wasControlled = !!controlled[key]
         const nowControlled = !!winner
@@ -142,5 +159,6 @@ module.exports = {
     effective,
     isControlled,
     SETTING_KEYS,
+    TEXT_SETTING_KEYS,
     DEFAULT_SETTINGS
 }

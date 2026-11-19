@@ -63,6 +63,12 @@ let root = null;
 let isClassCountdown = true
 let isClassHidden = true
 let isAlwaysMinimized = false // 始终缩小状态
+// 明日课程预览：放学后（最后一个时间段结束、或整日没课）进入预览态
+// previewDay 非空表示正在展示那一天；endBannerText 非空表示该日改用结束横幅替代课表
+let previewDay = null
+let endBannerActive = false
+// 自动任务下发的结束横幅文案（覆盖配置里的静态文案）
+let endBannerTextOverride = null
 let isSecureConnection = true // 渲染态标记
 // 是否已经收到过云端（或离线缓存）下发的配置；没有配置时页面会停在 :root{display:none}
 let hasConfigFromCloud = false
@@ -272,7 +278,8 @@ function changeScheduleClass(classHtml, inner) {
     return classHtml
 }
 
-function setScheduleClass() {
+// 课表行（含分隔线）。结束横幅要按课表原宽度撑开，需要先把它渲染出来量宽，故抽出来复用
+function buildScheduleHtml() {
     let classHtml = '';
     for (let i = 0; i < scheduleData.scheduleArray.length; i++) {
         let inner = scheduleData.scheduleArray[i]
@@ -285,7 +292,25 @@ function setScheduleClass() {
         if (scheduleData.divider.includes(i))
             classHtml += '<div class="divider"></div>'
     }
-    classContainer.innerHTML = classHtml
+    return classHtml
+}
+
+function setScheduleClass() {
+    // 结束横幅：整块替换课表区域，居中且不滚动
+    if (endBannerActive) {
+        // classContainer 是 auto 宽度，直接换成横幅会缩到文案宽度。
+        // 先渲染课表量出原宽度作为 min-width：文案更宽时自然撑宽，更窄时保持课表原宽度
+        classContainer.style.minWidth = ''
+        classContainer.innerHTML = buildScheduleHtml()
+        const baseWidth = classContainer.offsetWidth
+        classContainer.innerHTML = '<div class="class endBanner" id="endBanner"></div>'
+        document.getElementById('endBanner').textContent = scheduleData.endBannerText || ''
+        if (baseWidth > 0) classContainer.style.minWidth = baseWidth + 'px'
+        setBanner();
+        return
+    }
+    classContainer.style.minWidth = ''
+    classContainer.innerHTML = buildScheduleHtml()
 
     // 使用统一规则设置 banner
     setBanner();
@@ -320,6 +345,15 @@ function setCountdownerContent() {
     countdownText.innerText = scheduleData.currentHighlight.countdownText;
 
     const globalContainer = document.getElementById('globalContainer');
+
+    // 放学后倒计时不再有意义：结束横幅与明日预览都隐藏倒计时框，
+    // 找不到可预览的日子时同样只隐藏倒计时（课表保持当天灰字）
+    if (scheduleData.isEndToday) {
+        countdownContainer.style.display = 'none'
+        miniCountdown.style.display = 'none'
+        if (globalContainer) globalContainer.style.display = 'block'
+        return
+    }
 
     if (scheduleData.currentHighlight.type === 'current') {
         if (isClassCountdown) {
@@ -413,8 +447,9 @@ function setCountdownerPosition() {
 }
 
 function setSidebar() {
-    let date = getCurrentEditedDate()
-    let week = date.getDay()
+    // 预览态：日期与星期都要跟着换成目标日
+    let date = previewDay ? previewDay.date : getCurrentEditedDate()
+    let week = previewDay ? previewDay.day : date.getDay()
     let data = scheduleConfig.daily_class[week]
     weekCH.innerText = data.Chinese
     weekEN.innerText = data.English
@@ -439,14 +474,48 @@ function setSidebar() {
     leftSidebar.style.display = scheduleConfig.week_display ? 'block' : 'none'
 }
 
+// 结束横幅文案：自动任务下发的文案优先，其次取配置里的静态文案
+function currentEndBannerText() {
+    const text = endBannerTextOverride === null || endBannerTextOverride === '' ?
+        (scheduleConfig.end_banner_text || '') : endBannerTextOverride
+    return String(text).trim()
+}
+
+// 放学后重算当日状态：决定今天是走「结束横幅」还是「明日课表预览」，两者都没有就只隐藏倒计时
+function refreshPreviewState() {
+    const today = getScheduleData()
+    const editedDate = getCurrentEditedDate()
+    const isOver = !!today.currentHighlight.isEnd
+    const bannerText = isOver ? currentEndBannerText() : ''
+    endBannerActive = !!bannerText
+    previewDay = (isOver && !endBannerActive) ? findPreviewDay(editedDate, getCurrentEditedDay(editedDate)) : null
+    if (endBannerActive) today.endBannerText = bannerText
+    today.isEndToday = isOver
+    return today
+}
+
+// 按当前时刻与预览状态重建 scheduleData：tick 与配置下发共用，
+// 避免两处各写一遍「预览取哪一天」的判定而逐渐漂移
+function rebuildScheduleData() {
+    const today = refreshPreviewState()
+    // 预览态用目标日的课表与作息表；无预览目标时就是今天本身
+    const data = previewDay ? getScheduleData(previewDay) : today
+    data.isEndToday = today.isEndToday
+    data.endBannerText = today.endBannerText
+    return data
+}
+
 function tick(reset = false) {
-    scheduleData = getScheduleData();
+    scheduleData = rebuildScheduleData()
     setCountdownerContent()
     // 时间驱动的真实日程变化：只有它才需要重新拉取云端配置与天气
+    const previewKey = (endBannerActive ? 'end' : (previewDay ? String(previewDay.day) : 'none')) + '|' + (scheduleData.endBannerText || '')
+    scheduleData.previewKey = previewKey
     const stateChanged = JSON.stringify(scheduleData.scheduleArray) !== JSON.stringify(lastScheduleData.scheduleArray) ||
         scheduleData.currentHighlight.index !== lastScheduleData.currentHighlight.index ||
         scheduleData.currentHighlight.fullName !== lastScheduleData.currentHighlight.fullName ||
-        scheduleData.currentHighlight.type !== lastScheduleData.currentHighlight.type
+        scheduleData.currentHighlight.type !== lastScheduleData.currentHighlight.type ||
+        previewKey !== lastScheduleData.previewKey
     // reset 仅表示「要求重绘」（自动客户端配置下发、临时调课、窗口状态变化等）
     if (stateChanged || reset) {
         setScheduleClass()
@@ -737,6 +806,10 @@ function revealMainWindow() {
     }
     ensureScheduleRendered()
     root.style.display = 'block'
+    // 结束横幅要按课表原宽度撑开，而宽度只有在元素已布局时才量得准。
+    // 配置可能在窗口揭示前就到达（display:none 时 offsetWidth 恒为 0），
+    // 那一次会漏设 min-width，故揭示后补绘一次
+    if (endBannerActive) setScheduleClass()
     applyVisibilityState()
 }
 
@@ -1027,7 +1100,7 @@ function applyNewConfig(arg) {
     for (const key in mergedCss2) {
         root.style.setProperty(key, mergedCss2[key])
     }
-    scheduleData = getScheduleData();
+    scheduleData = rebuildScheduleData();
     setScheduleClass()
     setSidebar()
     hasRenderedSchedule = true
@@ -1066,6 +1139,12 @@ ipcRenderer.on('ClassCountdown', (e, arg) => {
 
 ipcRenderer.on('ClassHidden', (e, arg) => {
     isClassHidden = arg
+    tick(true)
+})
+
+// 自动任务下发结束横幅文案：空串表示不覆盖，回落到 client_config 里的静态文案
+ipcRenderer.on('EndBanner', (e, arg) => {
+    endBannerTextOverride = typeof arg === 'string' && arg.trim() !== '' ? arg : null
     tick(true)
 })
 

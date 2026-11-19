@@ -75,6 +75,20 @@
     color: rgba(0, 255, 10, 1);
 }
 
+/*noinspection CssUnresolvedCustomProperty*/
+/* 结束横幅：占据课表的位置，居中且不滚动。
+   classContainer 本身是 auto 宽度 + justify-content: space-around，
+   因此内容更宽时容器被撑宽，内容更窄时保持课表原宽度。 */
+.endBanner {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    color: rgba(255, 255, 255, 1);
+    white-space: nowrap;
+}
+
 .upcoming {
     color: rgba(0, 255, 10, 1);
     animation: highlightUpcoming 1.5s;

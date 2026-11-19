@@ -127,6 +127,12 @@ function cronActive(when, now) {
     return now.getTime() >= start.getTime() && now.getTime() < endTime
 }
 
+// tomorrowNoClass 判定「明天没课」：ctx.tomorrowHasClass 由调用方按服务端下发的
+// 整周 daily_class 计算（day 下标即 getDay()），服务端没有这个上下文，只在这里求值。
+function tomorrowNoClass(ctx) {
+    return ctx.tomorrowHasClass === false
+}
+
 // isActive 判断条件在 ctx.now 是否命中
 function isActive(when, ctx) {
     if (!when) return true
@@ -143,6 +149,8 @@ function isActive(when, ctx) {
             return eventActive(when, ctx)
         case 'cron':
             return cronActive(when, now)
+        case 'tomorrow_no_class':
+            return tomorrowNoClass(ctx)
         default:
             return false
     }

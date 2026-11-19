@@ -181,6 +181,53 @@ test('条件：未知类型与缺省条件', () => {
     assert.ok(!conditions.isActive({ kind: 'unknown' }, ctxOf(day(2026, 9, 1, 8))))
 })
 
+test('条件：明天没课只在 tomorrowHasClass 明确为 false 时命中', () => {
+    const when = { kind: 'tomorrow_no_class' }
+    const now = day(2026, 9, 1, 20)
+    assert.ok(conditions.isActive(when, ctxOf(now, { tomorrowHasClass: false })))
+    assert.ok(!conditions.isActive(when, ctxOf(now, { tomorrowHasClass: true })))
+    // 上下文没给这个字段时不能当成「明天没课」
+    assert.ok(!conditions.isActive(when, ctxOf(now)))
+})
+
+// 调度器按真实当前时间算上下文，这里按运行时的「明天」构造课表，保证断言确定
+function tomorrowOf(now = new Date()) {
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+}
+
+function bannerSchedule(tomorrowTimetable) {
+    const daily = Array.from({length: 7}, () => ({classList: ['语文'], timetable: '常日'}))
+    daily[tomorrowOf().getDay()] = {classList: [], timetable: tomorrowTimetable}
+    return {
+        daily_class: daily,
+        timetable: {常日: {'08:00-08:39': 0}, 没课: {'00:00-00:00': 0, '00:01-23:59': '没课'}},
+        client_config_rules: [
+            {taskId: 1, priority: 10, specificity: 1, when: {kind: 'tomorrow_no_class'}, settings: {end_banner_text: '明天没课，早点休息'}}
+        ]
+    }
+}
+
+test('调度器：明天没课时下发结束横幅文案', () => {
+    const applied = setupScheduler()
+    scheduler.updateFromSchedule(bannerSchedule('没课'))
+    scheduler.recompute(true)
+
+    const hit = lastAppliedOf(applied, 'end_banner_text')
+    assert.ok(hit, '明天没课时必须下发结束横幅文案')
+    assert.strictEqual(hit.value, '明天没课，早点休息')
+    assert.strictEqual(hit.fromRule, true, '来自自动任务时必须标记为规则接管')
+})
+
+test('调度器：明天有课时该规则不生效，回落到本地设置', () => {
+    const applied = setupScheduler({end_banner_text: '本地文案'})
+    scheduler.updateFromSchedule(bannerSchedule('常日'))
+    scheduler.recompute(true)
+
+    const hit = lastAppliedOf(applied, 'end_banner_text')
+    assert.strictEqual(hit.value, '本地文案')
+    assert.strictEqual(hit.fromRule, false, '规则没命中时不能标记为规则接管')
+})
+
 // ============================================================
 // 调度器
 // ============================================================
