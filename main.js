@@ -126,20 +126,32 @@ const CLIENT_CONFIG_CHANNELS = {
     isDuringClassCountdown: 'ClassCountdown'
 }
 
+// 结束横幅文案可由自动任务覆盖（字符串值），与上面三个布尔开关走同一条下发链路，
+// 但必须按字符串透传——Boolean() 会把任意文案压成 true
+const CLIENT_CONFIG_TEXT_CHANNELS = {
+    end_banner_text: 'EndBanner'
+}
+
 // 把生效值下发到渲染进程。页面未加载完时 webContents.send 会被静默丢弃，
 // 必须抛错让调用方不要记账：clientConfig 一旦记下「已下发」，值不变时就永远不会重发，
 // 渲染进程会永久停在默认值；带错误码是为了让调用方按预期/故障分级记录
-function pushRendererSetting(channel, value) {
+function pushRendererSetting(channel, value, asText = false) {
     if (!win || win.isDestroyed() || !win.webContents || win.webContents.isDestroyed()) return
     if (win.webContents.isLoading()) {
         const notReady = new Error('renderer not ready for ' + channel)
         notReady.code = 'RENDERER_NOT_READY'
         throw notReady
     }
-    win.webContents.send(channel, Boolean(value))
+    win.webContents.send(channel, asText ? String(value ?? '') : Boolean(value))
 }
 
 function applyClientConfigSetting(key, value, fromRule) {
+    // 文本类配置（结束横幅文案）没有托盘勾选，直接判断后下发
+    const textChannel = CLIENT_CONFIG_TEXT_CHANNELS[key]
+    if (textChannel) {
+        pushRendererSetting(textChannel, value, true)
+        return
+    }
     // 托盘勾选跟随「求值结果」，与 IPC 是否投递成功无关：先同步，
     // 避免窗口不可用或页面未就绪时的提前 return/throw 把它一起跳过
     syncTrayCheckbox(key, Boolean(value), fromRule)
