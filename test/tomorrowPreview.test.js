@@ -90,3 +90,32 @@ test('预览不套用当天的临时调课', () => {
 
     assert.deepStrictEqual(data.scheduleArray, ['语文'], '调课只影响当天')
 })
+
+// issue #72 补充说明：本自然周跨天有课（周五课、周六休、周日课）时，
+// 周五放学应显示周日课表——中间的空档要跳过，但目标日仍在同一自然周内。
+test('本周内跨空档：周五放学遇到周六休、周日有课则预览周日', () => {
+    const config = buildConfig()
+    config.daily_class[0] = {classList: ['语文'], timetable: '常日'} // 周日有课
+    const {context} = setup(FIXED_NOW, config)
+
+    const friday = new Date(2026, 8, 18) // 2026-09-18 是周五
+    const preview = plain(context.findPreviewDay(friday, 5))
+
+    assert.strictEqual(preview.day, 0, '跳过周六，落到周日')
+    assert.strictEqual(new Date(preview.date).getDate(), 20)
+})
+
+// issue #72 补充说明：本自然周没课但下一天有课（本周日课、下周一课）时，
+// 周日放学要显示下周一课表——预览允许跨自然周，不能被周界截断。
+test('跨自然周：周日放学预览下周一课表', () => {
+    const config = buildConfig()
+    config.daily_class[0] = {classList: [], timetable: '没课'} // 本周日休
+    config.daily_class[1] = {classList: ['语文'], timetable: '常日'} // 下周一有课
+    const {context} = setup(FIXED_NOW, config)
+
+    const sunday = new Date(2026, 8, 20) // 2026-09-20 是周日
+    const preview = plain(context.findPreviewDay(sunday, 0))
+
+    assert.strictEqual(preview.day, 1, '跨过自然周界落到下周一')
+    assert.strictEqual(new Date(preview.date).getDate(), 21)
+})
